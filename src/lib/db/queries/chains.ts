@@ -39,6 +39,18 @@ export async function deleteChain(id: string) {
   await db.delete(chain).where(eq(chain.id, id))
 }
 
+export async function duplicateChain(sourceId: string, newId: string, newName: string) {
+  const source = await getChainById(sourceId)
+  if (!source) return null
+  const [row] = await db.insert(chain).values({
+    id: newId,
+    name: newName,
+    langSource: source.langSource,
+    audience: source.audience,
+  }).returning()
+  return row
+}
+
 // Publication accounts
 
 export async function getPublicationAccounts(chainId: string) {

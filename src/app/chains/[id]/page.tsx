@@ -40,6 +40,14 @@ export default function ChainDetailPage() {
     setSaving(false)
   }
 
+  async function handleDuplicate() {
+    const res = await fetch(`/api/chains/${id}/duplicate`, { method: 'POST' })
+    const json = await res.json()
+    if (json.data) {
+      router.push(`/chains/${json.data.id}`)
+    }
+  }
+
   async function handleDelete() {
     if (!confirm('Supprimer cette chaîne et tous ses fichiers ?')) return
     await fetch(`/api/chains/${id}`, { method: 'DELETE' })
@@ -69,6 +77,9 @@ export default function ChainDetailPage() {
         <div className="flex gap-2">
           <Button onClick={handleSave} disabled={saving}>
             {saving ? 'Enregistrement...' : 'Enregistrer'}
+          </Button>
+          <Button variant="outline" onClick={handleDuplicate}>
+            Dupliquer
           </Button>
           <Button variant="destructive" onClick={handleDelete}>
             Supprimer
