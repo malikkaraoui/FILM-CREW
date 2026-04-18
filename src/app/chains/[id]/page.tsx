@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { BrandKitForm } from '@/components/brand-kit/brand-kit-form'
 import type { Chain } from '@/types/chain'
 
 export default function ChainDetailPage() {
@@ -77,7 +78,7 @@ export default function ChainDetailPage() {
 
       <div className="mt-8">
         <h2 className="text-lg font-semibold">Brand Kit</h2>
-        <p className="text-sm text-muted-foreground">Configuration des images, voix et palette — Epic 1 Story 1.4</p>
+        <BrandKitForm chainId={id} />
       </div>
 
       <div className="mt-8">
