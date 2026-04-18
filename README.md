@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎬 VIDEO_TIKTOK
+# 🎬 FILM-CREW
 
 ### The AI-native control tower for short-form video production
 
@@ -22,7 +22,7 @@ Turn a raw idea into a branded short-form content pipeline — with local-first 
 
 Le marché de la vidéo courte IA est encore un puzzle : idéation, script, voix, vidéo, sous-titres, publication… tout est éclaté entre plusieurs outils.
 
-**VIDEO_TIKTOK** vise à devenir l'orchestre complet :
+**FILM-CREW** vise à devenir l'orchestre complet :
 
 - **une interface unique** pour piloter la production vidéo courte
 - **une architecture modulaire** pour brancher plusieurs providers IA sans refacto du core
@@ -55,7 +55,7 @@ Le projet est en **phase Alpha** avec des fondations déjà solides côté produ
 
 L'objectif est simple : construire un **studio de production IA pour créateurs solo**, capable de transformer une idée brute en pipeline éditorial industrialisé.
 
-À terme, VIDEO_TIKTOK doit permettre de :
+À terme, FILM-CREW doit permettre de :
 
 - structurer une idée via un **studio virtuel d'agents IA**
 - produire un storyboard cohérent avec le **Brand Identity Kit**
@@ -92,7 +92,7 @@ flowchart LR
 		E -. local .-> J[FFmpeg + Python workers]
 ```
 
-## Ce qui rend VIDEO_TIKTOK différent
+## Ce qui rend FILM-CREW différent
 
 ### 1. Local-first, pas local-only
 
