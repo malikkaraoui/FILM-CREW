@@ -1,0 +1,23 @@
+# VIDEO_TIKTOK — Python workers
+# Storyboard & Image generation
+# diffusers  # FLUX/SDXL — à installer quand Epic 5
+
+# Transcription
+# openai-whisper  # WhisperX — à installer quand Epic 6
+
+# Audio processing
+# librosa
+# pydub
+
+# CLIP scoring
+# clip  # à installer quand Epic 13
+
+# Face detection
+# mediapipe  # à installer quand Epic 11
+# insightface
+
+# Video download
+# yt-dlp  # à installer quand Epic 11
+
+# Common
+pytest
