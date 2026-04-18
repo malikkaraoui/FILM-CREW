@@ -5,7 +5,21 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import type { Chain } from '@/types/chain'
+
+type CostBreakdown = {
+  step: string
+  provider: string
+  costEur: number
+  note: string
+}
+
+type CostEstimate = {
+  totalEur: number
+  breakdown: CostBreakdown[]
+  warning: string | null
+}
 
 export default function NewRunPage() {
   const router = useRouter()
@@ -14,6 +28,8 @@ export default function NewRunPage() {
   const [idea, setIdea] = useState('')
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState('')
+  const [estimate, setEstimate] = useState<CostEstimate | null>(null)
+  const [loadingEstimate, setLoadingEstimate] = useState(true)
 
   useEffect(() => {
     fetch('/api/chains')
@@ -24,6 +40,13 @@ export default function NewRunPage() {
           if (json.data.length > 0) setChainId(json.data[0].id)
         }
       })
+
+    fetch('/api/runs/estimate')
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.data) setEstimate(json.data)
+      })
+      .finally(() => setLoadingEstimate(false))
   }, [])
 
   async function handleLaunch() {
@@ -75,6 +98,45 @@ export default function NewRunPage() {
             placeholder="La polémique Mbappé expliquée en 90 secondes"
           />
         </div>
+
+        {/* Estimation de coût */}
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm font-medium">Coût estimé</CardTitle>
+            {loadingEstimate ? (
+              <p className="text-xs text-muted-foreground">Calcul en cours...</p>
+            ) : estimate ? (
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-2xl font-bold">{estimate.totalEur.toFixed(2)} €</span>
+                  <span className="text-xs text-muted-foreground">estimation moyenne</span>
+                </div>
+
+                <div className="space-y-1">
+                  {estimate.breakdown
+                    .filter((b) => b.costEur > 0)
+                    .map((b) => (
+                      <div key={b.step} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{b.step}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-muted-foreground">{b.provider}</span>
+                          <span className="font-mono">{b.costEur.toFixed(2)} €</span>
+                        </span>
+                      </div>
+                    ))}
+                </div>
+
+                {estimate.warning && (
+                  <div className="rounded-md border border-amber-400 bg-amber-50 px-2 py-1.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                    {estimate.warning}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Estimation indisponible</p>
+            )}
+          </CardHeader>
+        </Card>
 
         {error && (
           <div className="rounded-md border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
