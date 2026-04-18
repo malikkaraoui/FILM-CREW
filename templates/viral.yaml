@@ -1,0 +1,16 @@
+name: Viral
+description: Style TikTok pur, maximum d'impact en minimum de temps
+style: viral
+rhythm: ultra-rapide — 2-3s par plan, zéro temps mort
+transitions:
+  - glitch
+  - RGB split
+  - zoom rapide
+subtitleStyle: énorme centré, couleurs flash, rotation légère, mode Hormozi IA
+agentTones:
+  lenny: "Hook en 2s, controverse, twist, CTA agressif"
+  laura: "Plans serrés, mouvements rapides, POV, handheld"
+  nael: "Shock value, plot twist chaque 10s, tension maximale"
+  emilie: "Couleurs saturées, néon, contrastes extrêmes"
+  nico: "Flash, stroboscope subtil, couleurs RGB, ambiance club"
+promptPrefix: "viral tiktok style, dynamic camera, neon colors, high energy, fast paced, trending aesthetic"

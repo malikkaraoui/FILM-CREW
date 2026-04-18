@@ -1,0 +1,15 @@
+name: Face caméra
+description: Style podcast vidéo, un seul personnage face caméra
+style: talking-head
+rhythm: moyen — alternance face caméra et inserts, 5-8s par plan
+transitions:
+  - coupure sèche
+  - jump cut
+subtitleStyle: texte bas, surbrillance mot par mot, style Hormozi
+agentTones:
+  lenny: "Monologue conversationnel, interpellation directe, anecdotes"
+  laura: "Plan taille, légèrement décentré, regard caméra"
+  nael: "Authenticité, pas d'effets, énergie naturelle"
+  emilie: "Tenue cohérente, fond minimaliste, brand colors en accent"
+  nico: "Key light 45°, fill doux, séparation fond"
+promptPrefix: "person talking to camera, eye contact, minimal background, natural lighting, vlog style"

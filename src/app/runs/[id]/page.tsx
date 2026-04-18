@@ -44,7 +44,15 @@ export default function RunPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold truncate max-w-md">{run.idea}</h1>
         {run.status === 'running' && (
-          <Button variant="destructive" size="sm">
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={async () => {
+              if (!confirm('Arrêter ce run ? Les clips déjà générés seront conservés.')) return
+              await fetch(`/api/runs/${id}/kill`, { method: 'POST' })
+              loadRun()
+            }}
+          >
             Arrêter
           </Button>
         )}

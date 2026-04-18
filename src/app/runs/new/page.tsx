@@ -30,6 +30,8 @@ export default function NewRunPage() {
   const [error, setError] = useState('')
   const [estimate, setEstimate] = useState<CostEstimate | null>(null)
   const [loadingEstimate, setLoadingEstimate] = useState(true)
+  const [templates, setTemplates] = useState<{ id: string; name: string; description: string }[]>([])
+  const [templateId, setTemplateId] = useState('')
 
   useEffect(() => {
     fetch('/api/chains')
@@ -47,6 +49,12 @@ export default function NewRunPage() {
         if (json.data) setEstimate(json.data)
       })
       .finally(() => setLoadingEstimate(false))
+
+    fetch('/api/templates')
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.data) setTemplates(json.data)
+      })
   }, [])
 
   async function handleLaunch() {
@@ -57,7 +65,7 @@ export default function NewRunPage() {
     const res = await fetch('/api/runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chainId, idea: idea.trim() }),
+      body: JSON.stringify({ chainId, idea: idea.trim(), template: templateId || undefined }),
     })
     const json = await res.json()
 
@@ -98,6 +106,24 @@ export default function NewRunPage() {
             placeholder="La polémique Mbappé expliquée en 90 secondes"
           />
         </div>
+
+        {/* Template de style */}
+        {templates.length > 0 && (
+          <div>
+            <Label htmlFor="template">Style</Label>
+            <select
+              id="template"
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+            >
+              <option value="">Aucun template</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} — {t.description}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Estimation de coût */}
         <Card>

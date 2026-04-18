@@ -1,0 +1,15 @@
+name: Cinématique
+description: Style immersif, éclairage dramatique, mouvements lents
+style: cinematic
+rhythm: lent — plans longs, respirations visuelles, transitions douces
+transitions:
+  - fondu
+  - fondu enchaîné
+subtitleStyle: minimaliste blanc, ombre portée, bas de l'écran
+agentTones:
+  lenny: "Narration contemplative, phrases longues, silences"
+  laura: "Plans larges, travellings lents, profondeur de champ"
+  nael: "Ambiance suspense, montée en tension progressive"
+  emilie: "Palette sombre et dorée, textures grain film"
+  nico: "Lumière naturelle contrastée, golden hour, ombres marquées"
+promptPrefix: "cinematic style, film grain, shallow depth of field, dramatic lighting"

@@ -1,0 +1,15 @@
+name: Documentaire
+description: Style reportage, images d'archives, narration voix-off
+style: documentary
+rhythm: moyen — plans variés, rythme journalistique
+transitions:
+  - fondu
+  - coupure sèche
+subtitleStyle: bande inférieure, police serif, lettres capitales
+agentTones:
+  lenny: "Narration factuelle, chronologie, sources citées"
+  laura: "Plans de coupe, archives, interviews simulées"
+  nael: "Tension narrative, révélation progressive, cliffhangers"
+  emilie: "Palette muted, textures vintage, overlays texte"
+  nico: "Lumière naturelle, intérieurs sombres, contrastes forts"
+promptPrefix: "documentary style, muted colors, realistic, photojournalistic, archival footage feel"

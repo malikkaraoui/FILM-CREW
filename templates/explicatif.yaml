@@ -1,0 +1,15 @@
+name: Explicatif
+description: Style pédagogique, rythme soutenu, focus sur la clarté
+style: educational
+rhythm: rapide — coupes franches, 3-5s par plan, énergie constante
+transitions:
+  - coupure sèche
+  - zoom
+subtitleStyle: gros texte centré, couleur vive, animation mot par mot
+agentTones:
+  lenny: "Structure question-réponse, hooks percutants, chiffres"
+  laura: "Gros plans, face caméra, inserts sur texte"
+  nael: "Rythme TikTok, punch line par scène, pas de temps mort"
+  emilie: "Couleurs vives, backgrounds unis, icônes flat"
+  nico: "Éclairage studio uniforme, ring light, pas d'ombre"
+promptPrefix: "clean studio background, bright lighting, educational style, modern flat design"
