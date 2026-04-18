@@ -59,8 +59,15 @@ export async function executePipeline(runId: string): Promise<void> {
     await updateStepStatus(runId, step.stepNumber, 'running')
     await updateRunStatus(runId, 'running', step.stepNumber)
 
+    // Heartbeat toutes les 60s pendant l'exécution du step
+    // (les steps LLM/Ollama peuvent prendre plusieurs minutes)
+    const heartbeatInterval = setInterval(async () => {
+      try { await updateRunStatus(runId, 'running', step.stepNumber) } catch { /* best-effort */ }
+    }, 60_000)
+
     try {
       const result = await step.execute(ctx)
+      clearInterval(heartbeatInterval)
 
       totalCost += result.costEur
       await updateRunCost(runId, totalCost)
@@ -79,6 +86,7 @@ export async function executePipeline(runId: string): Promise<void> {
 
       logger.info({ event: 'step_completed', runId, step: step.name, costEur: result.costEur })
     } catch (e) {
+      clearInterval(heartbeatInterval)
       const error = (e as Error).message
       await updateStepStatus(runId, step.stepNumber, 'failed', { error })
       await updateRunStatus(runId, 'failed', step.stepNumber)

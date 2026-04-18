@@ -1,6 +1,6 @@
 import { db } from '../connection'
 import { run, runStep } from '../schema'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, or } from 'drizzle-orm'
 
 const STEP_NAMES = [
   'Idée',
@@ -27,7 +27,9 @@ export async function getRunSteps(runId: string) {
 }
 
 export async function getActiveRun() {
-  const rows = await db.select().from(run).where(eq(run.status, 'running'))
+  const rows = await db.select().from(run).where(
+    or(eq(run.status, 'running'), eq(run.status, 'pending'))
+  )
   return rows[0] ?? null
 }
 
