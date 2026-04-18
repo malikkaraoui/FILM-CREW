@@ -24,6 +24,16 @@ export default function RunPage() {
     if (json.data) setRun(json.data)
   }
 
+  async function handleStepBack(stepNumber: number) {
+    if (!confirm(`Revenir à l'étape ${stepNumber} ?`)) return
+    await fetch(`/api/runs/${id}/step-back`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetStep: stepNumber }),
+    })
+    loadRun()
+  }
+
   if (!run) return <p className="text-sm text-muted-foreground">Chargement...</p>
 
   const currentStep = run.currentStep ?? 1
@@ -40,7 +50,7 @@ export default function RunPage() {
       </div>
 
       <div className="mt-4">
-        <RunStepper steps={run.steps} currentStep={currentStep} />
+        <RunStepper steps={run.steps} currentStep={currentStep} onStepClick={handleStepBack} />
       </div>
 
       <div className="mt-6 rounded-md border p-4">
