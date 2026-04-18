@@ -1,0 +1,46 @@
+export type AgentRole =
+  | 'mia'      // Cheffe de projet / Productrice
+  | 'lenny'    // Scénariste
+  | 'laura'    // Cadreuse
+  | 'nael'     // Metteur en scène
+  | 'emilie'   // Habillage / Brand Kit
+  | 'nico'     // Lumière
+
+export type AgentProfile = {
+  role: AgentRole
+  displayName: string
+  title: string
+  color: string
+  systemPrompt: string
+  briefSection: string // La section du brief que cet agent remplit
+}
+
+export type AgentMessage = {
+  id: string
+  runId: string
+  agentName: string
+  messageType: 'dialogue' | 'web_search' | 'validation' | 'rejection' | 'brief_section'
+  content: string
+  metadata?: {
+    model?: string
+    latencyMs?: number
+    costEur?: number
+    searchQuery?: string
+    searchResults?: string[]
+  }
+  createdAt: string
+}
+
+export type MeetingBrief = {
+  runId: string
+  idea: string
+  sections: {
+    agent: AgentRole
+    title: string
+    content: string
+  }[]
+  summary: string
+  estimatedBudget: string
+  validatedBy: string
+  createdAt: string
+}

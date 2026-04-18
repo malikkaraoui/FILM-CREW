@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { RunStepper } from '@/components/stepper/run-stepper'
 import { Button } from '@/components/ui/button'
 import type { Run, RunStep } from '@/types/run'
@@ -58,13 +59,16 @@ export default function RunPage() {
           Étape {currentStep} — {run.steps.find((s) => s.stepNumber === currentStep)?.stepName}
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Contenu de l'étape — à implémenter dans les Epics 4-7
+          Contenu de l'étape — à implémenter dans les Epics suivants
         </p>
       </div>
 
       <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
         <span>Coût : {(run.costEur ?? 0).toFixed(2)} €</span>
         <span>Statut : {run.status}</span>
+        <Link href={`/runs/${id}/studio`} className="text-primary hover:underline">
+          Voir la réunion
+        </Link>
       </div>
     </div>
   )
