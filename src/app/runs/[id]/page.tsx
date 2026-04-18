@@ -63,11 +63,17 @@ export default function RunPage() {
         </p>
       </div>
 
-      <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
+      <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
         <span>Coût : {(run.costEur ?? 0).toFixed(2)} €</span>
         <span>Statut : {run.status}</span>
         <Link href={`/runs/${id}/studio`} className="text-primary hover:underline">
-          Voir la réunion
+          Réunion
+        </Link>
+        <Link href={`/runs/${id}/storyboard`} className="text-primary hover:underline">
+          Storyboard
+        </Link>
+        <Link href={`/runs/${id}/preview`} className="text-primary hover:underline">
+          Preview
         </Link>
       </div>
     </div>

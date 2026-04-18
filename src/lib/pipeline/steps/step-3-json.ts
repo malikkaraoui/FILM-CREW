@@ -1,0 +1,80 @@
+import { writeFile } from 'fs/promises'
+import { join } from 'path'
+import { registry } from '@/lib/providers/registry'
+import { executeWithFailover } from '@/lib/providers/failover'
+import type { LLMProvider } from '@/lib/providers/types'
+import type { PipelineStep, StepContext, StepResult } from '../types'
+
+export const step3Json: PipelineStep = {
+  name: 'JSON structuré',
+  stepNumber: 3,
+
+  async execute(ctx: StepContext): Promise<StepResult> {
+    // Lire le brief de l'étape précédente depuis le run
+    // On demande au LLM de transformer le brief en structure JSON
+
+    const { result } = await executeWithFailover(
+      'llm',
+      async (p) => {
+        const llm = p as LLMProvider
+        return llm.chat(
+          [
+            {
+              role: 'system',
+              content: `Tu es un assistant de production vidéo. Transforme le brief de réunion en un document JSON structuré pour la production.
+Le JSON doit contenir :
+{
+  "title": "titre de la vidéo",
+  "hook": "phrase d'accroche (5-10 mots)",
+  "scenes": [
+    {
+      "index": 1,
+      "description": "description visuelle détaillée de la scène",
+      "dialogue": "texte de la narration pour cette scène",
+      "camera": "mouvement caméra (1 seul)",
+      "lighting": "description éclairage",
+      "duration_s": 10
+    }
+  ],
+  "style": "style visuel global",
+  "tone": "ton émotionnel",
+  "target_duration_s": 90
+}
+Retourne UNIQUEMENT le JSON, sans markdown ni explication.`,
+            },
+            {
+              role: 'user',
+              content: `Idée : ${ctx.idea}\n\nTransforme en JSON structuré pour la production.`,
+            },
+          ],
+          { temperature: 0.5, maxTokens: 2048 },
+        )
+      },
+      ctx.runId,
+    )
+
+    // Parser et sauvegarder le JSON
+    let parsed: unknown
+    try {
+      // Extraire le JSON de la réponse (au cas où il y a du texte autour)
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/)
+      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(result.content)
+    } catch {
+      return {
+        success: false,
+        costEur: result.costEur,
+        outputData: { raw: result.content },
+        error: 'Impossible de parser le JSON structuré',
+      }
+    }
+
+    const outputPath = join(ctx.storagePath, 'structure.json')
+    await writeFile(outputPath, JSON.stringify(parsed, null, 2))
+
+    return {
+      success: true,
+      costEur: result.costEur,
+      outputData: parsed,
+    }
+  },
+}
