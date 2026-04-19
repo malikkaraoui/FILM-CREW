@@ -35,6 +35,17 @@ export const step2Brainstorm: PipelineStep = {
       JSON.stringify(brief, null, 2),
     )
 
+    // Vérifier que le brief est exploitable
+    const nonEmptySections = brief.sections.filter(s => s.content.trim().length > 0)
+    if (!brief.summary?.trim() && nonEmptySections.length === 0) {
+      return {
+        success: false,
+        costEur: totalCost,
+        outputData: brief,
+        error: `Brief vide : summary=${brief.summary?.length ?? 0} chars, sections non-vides=${nonEmptySections.length}/5. Le LLM retourne des réponses vides.`,
+      }
+    }
+
     return {
       success: true,
       costEur: totalCost,

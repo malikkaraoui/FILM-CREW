@@ -42,9 +42,14 @@ export const ollamaProvider: LLMProvider = {
 
     const data = await res.json()
     const latencyMs = Date.now() - start
+    const content = data.message?.content ?? ''
+
+    if (!content.trim()) {
+      throw new Error(`Ollama réponse vide (model=${model}, tokens=${data.eval_count ?? 0}, prompt_tokens=${data.prompt_eval_count ?? 0})`)
+    }
 
     return {
-      content: data.message?.content ?? '',
+      content,
       model,
       tokens: (data.eval_count ?? 0) + (data.prompt_eval_count ?? 0),
       latencyMs,

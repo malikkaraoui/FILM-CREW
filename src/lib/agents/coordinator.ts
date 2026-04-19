@@ -88,7 +88,12 @@ export class MeetingCoordinator {
     totalCost += brandCheck.metadata?.costEur ?? 0
 
     // Phase 5 : Chaque agent rédige sa section du brief
-    const transcript = this.formatTranscript()
+    const fullTranscript = this.formatTranscript()
+    // Tronquer à 2000 chars pour rester dans la fenêtre de contexte d'Ollama
+    const transcript = fullTranscript.length > 2000
+      ? fullTranscript.slice(0, 2000) + '\n\n[... transcript tronqué]'
+      : fullTranscript
+    logger.info({ event: 'meeting_transcript', runId: this.runId, fullLength: fullTranscript.length, truncatedLength: transcript.length })
     const briefSections: MeetingBrief['sections'] = []
 
     for (const role of ['lenny', 'laura', 'nael', 'emilie', 'nico'] as AgentRole[]) {
@@ -104,8 +109,8 @@ export class MeetingCoordinator {
       })
     }
 
-    // Phase 6 : Mia conclut
-    const closingContext = `Voici toute la réunion et les sections du brief :\n\n${this.formatTranscript()}\n\nConclus la réunion. Produis :\n1. Un résumé exécutif (5-7 lignes)\n2. Une estimation budget (en postes de coûts)\n3. Ta validation finale\n\nSois directe et structurée.`
+    // Phase 6 : Mia conclut — utiliser le transcript tronqué
+    const closingContext = `Voici la réunion et les sections du brief :\n\n${transcript}\n\nConclus la réunion. Produis :\n1. Un résumé exécutif (5-7 lignes)\n2. Une estimation budget (en postes de coûts)\n3. Ta validation finale\n\nSois directe et structurée.`
 
     const closing = await this.agentSpeak('mia', closingContext)
     totalCost += closing.metadata?.costEur ?? 0
