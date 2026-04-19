@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { logger } from '@/lib/logger'
+import { publishToTikTok, savePublishResult } from '@/lib/publishers/tiktok'
 import type { PipelineStep, StepContext, StepResult } from '../types'
 
 type PreviewManifest = {
@@ -26,13 +27,11 @@ export const step8Publish: PipelineStep = {
       return { success: false, costEur: 0, outputData: null, error: 'preview-manifest.json introuvable' }
     }
 
-    // Honnêteté produit : signaler clairement ce qui est disponible
     const { mode, playableFilePath } = previewManifest
     const hasPlayable = !!(playableFilePath)
 
     if (mode === 'none' && !hasPlayable) {
       logger.warn({ event: 'publish_no_media', runId: ctx.runId, mode })
-      // On continue quand même pour écrire les métadonnées disponibles
     }
 
     // Générer les métadonnées d'export
@@ -40,10 +39,13 @@ export const step8Publish: PipelineStep = {
       .then((raw) => JSON.parse(raw))
       .catch(() => ({ title: ctx.idea, scenes: [] }))
 
+    const title = structure.title || ctx.idea
+    const hashtags = ['#shorts', '#ai', '#filmcrew']
+
     const metadata = {
-      title: structure.title || ctx.idea,
-      description: `${structure.title || ctx.idea} — Généré par FILM-CREW`,
-      hashtags: ['#shorts', '#ai', '#filmcrew'],
+      title,
+      description: `${title} — Généré par FILM-CREW`,
+      hashtags,
       mode,
       mediaFile: playableFilePath
         ? `final/${mode === 'video_finale' ? 'video.mp4' : 'animatic.mp4'}`
@@ -61,17 +63,43 @@ export const step8Publish: PipelineStep = {
       JSON.stringify(metadata, null, 2),
     )
 
-    logger.info({ event: 'publish_ready', runId: ctx.runId, title: metadata.title, mode, hasPlayable })
+    // Tenter la publication TikTok si un fichier vidéo est disponible
+    const videoPath = playableFilePath
+      ? join(process.cwd(), playableFilePath.replace(/^\//, ''))
+      : join(ctx.storagePath, 'final', mode === 'video_finale' ? 'video.mp4' : 'animatic.mp4')
+
+    const publishResult = await publishToTikTok({
+      runId: ctx.runId,
+      videoPath,
+      title,
+      hashtags,
+      mediaMode: mode,
+    })
+
+    // Persister le résultat de publication — toujours, succès ou NO_CREDENTIALS
+    await savePublishResult(ctx.runId, publishResult)
+
+    logger.info({
+      event: 'publish_ready',
+      runId: ctx.runId,
+      title,
+      mode,
+      hasPlayable,
+      tiktokStatus: publishResult.status,
+      publishId: publishResult.publishId,
+    })
 
     return {
       success: true,
       costEur: 0,
       outputData: {
-        title: metadata.title,
+        title,
         mode,
         hasPlayable,
         mediaFile: metadata.mediaFile,
         platforms: Object.keys(metadata.platforms),
+        tiktokStatus: publishResult.status,
+        publishId: publishResult.publishId,
         status: hasPlayable ? 'ready_for_export' : 'metadata_only',
       },
     }
