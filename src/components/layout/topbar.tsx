@@ -78,7 +78,7 @@ export function Topbar() {
     } catch { /* silencieux */ }
   }
 
-  useEffect(() => { // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     void loadProviders()
     void loadActiveRun()
     void loadFailovers()

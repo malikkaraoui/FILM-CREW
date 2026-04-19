@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 export function ThemeToggle() {
   const [dark, setDark] = useState(false)
 
-  useEffect(() => { // eslint-disable-line react-hooks/set-state-in-effect
+  useEffect(() => {
     const saved = localStorage.getItem('theme')
     if (saved === 'dark') {
       setDark(true)

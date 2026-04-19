@@ -34,7 +34,7 @@ export default function ServicesPage() {
     setLoading(false)
   }
 
-  useEffect(() => { // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     void loadProviders()
     const interval = setInterval(() => void loadProviders(), 60_000)
     return () => clearInterval(interval)

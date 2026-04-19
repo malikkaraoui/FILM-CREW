@@ -30,7 +30,7 @@ export default function ExportPage() {
     }
   }
 
-  useEffect(() => { void loadExportData() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadExportData() }, [id])
 
   async function handleRegenerate() {
     setRegenerating(true)

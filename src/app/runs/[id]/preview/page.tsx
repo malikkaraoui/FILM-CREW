@@ -44,7 +44,7 @@ export default function PreviewPage() {
     } catch { /* silencieux */ }
   }
 
-  useEffect(() => { // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     void Promise.all([loadClips(), loadStoryboard()]).then(() => setLoading(false))
   }, [id])
 
