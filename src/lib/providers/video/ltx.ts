@@ -10,12 +10,12 @@ const API_KEY = process.env.LTX_API_KEY || ''
 const BASE_URL = 'https://api.ltx.video'
 
 function resolutionForAspectRatio(aspectRatio: string, resolution: string): string {
-  // LTX accepte des résolutions comme "1280x720", "720x1280", "1920x1080" etc.
+  // ltx-2-3-fast n'accepte que 1080x1920 pour le format portrait 9:16.
+  // Les résolutions inférieures (720x1280, 480x848) retournent "Resolution not supported".
   const [w, h] = (() => {
-    if (resolution === '1080p') return aspectRatio === '9:16' ? [1080, 1920] : [1920, 1080]
     if (resolution === '480p') return aspectRatio === '9:16' ? [480, 848] : [848, 480]
-    // 720p default
-    return aspectRatio === '9:16' ? [720, 1280] : [1280, 720]
+    // 720p et 1080p : forcer 1080x1920 en portrait (seule résolution portrait acceptée par ltx-2-3-fast)
+    return aspectRatio === '9:16' ? [1080, 1920] : [1920, 1080]
   })()
   return `${w}x${h}`
 }

@@ -14,9 +14,25 @@ type Metadata = {
 
 type ArtifactInfo = { name: string; sizeBytes: number }
 
+type PreviewManifest = {
+  mode: 'video_finale' | 'animatic' | 'storyboard_only' | 'none'
+  playableFilePath: string | null
+  mediaType: string | null
+  hasAudio: boolean
+  mediaFile: string | null
+}
+
+const MODE_LABELS: Record<string, string> = {
+  video_finale: 'Vidéo finale',
+  animatic: 'Animatic',
+  storyboard_only: 'Storyboard seul',
+  none: 'Aucun média',
+}
+
 export default function ExportPage() {
   const { id } = useParams<{ id: string }>()
   const [metadata, setMetadata] = useState<Metadata | null>(null)
+  const [manifest, setManifest] = useState<PreviewManifest | null>(null)
   const [regenerating, setRegenerating] = useState(false)
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([])
   const [imageCount, setImageCount] = useState(0)
@@ -25,12 +41,22 @@ export default function ExportPage() {
   const loadExportData = async () => {
     const res = await fetch(`/api/runs/${id}/export`)
     const json = await res.json()
-    if (json.data) {
-      setMetadata(json.data.metadata)
-    }
+    if (json.data) setMetadata(json.data.metadata)
   }
 
-  useEffect(() => { void loadExportData() }, [id])
+  const loadManifest = async () => {
+    try {
+      const res = await fetch(`/api/runs/${id}/preview-manifest`)
+      if (res.ok) {
+        const json = await res.json()
+        if (json.data) setManifest(json.data)
+      }
+    } catch { /* silencieux */ }
+  }
+
+  useEffect(() => {
+    void Promise.all([loadExportData(), loadManifest()])
+  }, [id])
 
   async function handleRegenerate() {
     setRegenerating(true)
@@ -59,15 +85,35 @@ export default function ExportPage() {
     setLoadingArtifacts(false)
   }
 
+  const hasPlayable = !!(manifest?.playableFilePath)
+  const mode = manifest?.mode ?? 'none'
+
   return (
     <div className="max-w-lg space-y-6">
-      <h1 className="text-xl font-semibold">Artefacts & Export</h1>
-
-      {/* État honnête */}
-      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-        Export vidéo final non disponible (pas de clips vidéo générés).
-        Les artefacts du pipeline (brief, structure, storyboard, prompts, métadonnées) sont consultables ci-dessous.
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-semibold">Artefacts & Export</h1>
+        {manifest && (
+          <Badge variant={mode === 'video_finale' ? 'default' : mode === 'animatic' ? 'secondary' : 'outline'}>
+            {MODE_LABELS[mode] ?? mode}
+          </Badge>
+        )}
       </div>
+
+      {/* État média honnête */}
+      {hasPlayable ? (
+        <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+          {mode === 'video_finale'
+            ? 'Vidéo finale disponible — clips vidéo réels assemblés.'
+            : 'Animatic disponible — slideshow storyboard' + (manifest?.hasAudio ? ' + audio' : '') + '.'}
+          {' '}Fichier : <code className="text-[11px]">{manifest?.mediaFile ?? 'final/'}</code>
+        </div>
+      ) : (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {mode === 'storyboard_only'
+            ? 'Storyboard disponible, mais aucun fichier média playable assemblé.'
+            : 'Aucun fichier média playable. Les artefacts texte et storyboard restent consultables ci-dessous.'}
+        </div>
+      )}
 
       {/* Métadonnées */}
       <Card>
@@ -149,7 +195,6 @@ export default function ExportPage() {
 
       <p className="text-xs text-muted-foreground">
         Les artefacts sont disponibles dans <code className="text-[10px]">storage/runs/{id}/</code>.
-        L&apos;export vidéo sera disponible quand un provider vidéo sera configuré.
       </p>
     </div>
   )

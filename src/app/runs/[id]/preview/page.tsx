@@ -22,10 +22,33 @@ type StoryboardImage = {
   status: 'pending' | 'generated' | 'validated' | 'rejected'
 }
 
+type PreviewManifest = {
+  mode: 'video_finale' | 'animatic' | 'storyboard_only' | 'none'
+  playableFilePath: string | null
+  mediaType: string | null
+  hasAudio: boolean
+  assemblyError: string | null
+}
+
+const MODE_LABELS: Record<string, string> = {
+  video_finale: 'Vidéo finale',
+  animatic: 'Animatic',
+  storyboard_only: 'Storyboard seul',
+  none: 'Aucun média',
+}
+
+const MODE_VARIANTS: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
+  video_finale: 'default',
+  animatic: 'secondary',
+  storyboard_only: 'outline',
+  none: 'destructive',
+}
+
 export default function PreviewPage() {
   const { id } = useParams<{ id: string }>()
   const [clips, setClips] = useState<Clip[]>([])
   const [storyboard, setStoryboard] = useState<StoryboardImage[]>([])
+  const [manifest, setManifest] = useState<PreviewManifest | null>(null)
   const [loading, setLoading] = useState(true)
 
   const loadClips = async () => {
@@ -44,31 +67,79 @@ export default function PreviewPage() {
     } catch { /* silencieux */ }
   }
 
+  const loadManifest = async () => {
+    try {
+      const res = await fetch(`/api/runs/${id}/preview-manifest`)
+      if (res.ok) {
+        const json = await res.json()
+        if (json.data) setManifest(json.data)
+      }
+    } catch { /* silencieux */ }
+  }
+
   useEffect(() => {
-    void Promise.all([loadClips(), loadStoryboard()]).then(() => setLoading(false))
+    void Promise.all([loadClips(), loadStoryboard(), loadManifest()]).then(() => setLoading(false))
   }, [id])
 
   if (loading) return <p className="text-sm text-muted-foreground">Chargement...</p>
 
   const completedClips = clips.filter(c => c.status === 'completed')
   const generatedImages = storyboard.filter(i => i.status === 'generated')
+  const hasPlayable = !!(manifest?.playableFilePath)
   const hasClips = completedClips.length > 0
   const hasStoryboard = generatedImages.length > 0
+  const mode = manifest?.mode ?? 'none'
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Preview</h1>
-
-      {/* État réel du run */}
-      <div className="rounded-md border p-3 text-sm">
-        {hasClips ? (
-          <p className="text-green-700">{completedClips.length} clip(s) vidéo généré(s) — assemblage non encore implémenté</p>
-        ) : hasStoryboard ? (
-          <p className="text-amber-700">Pas de clips vidéo (providers non configurés). Le storyboard est disponible ci-dessous.</p>
-        ) : (
-          <p className="text-muted-foreground">Aucun artefact visuel disponible. Le pipeline doit atteindre au moins le step 4 (Storyboard).</p>
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-semibold">Preview</h1>
+        <Badge variant={MODE_VARIANTS[mode] ?? 'outline'}>
+          {MODE_LABELS[mode] ?? mode}
+        </Badge>
+        {manifest?.hasAudio && (
+          <Badge variant="outline" className="text-xs">Audio</Badge>
         )}
       </div>
+
+      {/* Player vidéo ou animatic */}
+      {hasPlayable && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            {mode === 'video_finale'
+              ? 'Clips vidéo réels assemblés'
+              : 'Animatic — slideshow storyboard' + (manifest?.hasAudio ? ' + audio' : '')}
+          </p>
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <video
+            controls
+            className="w-full max-w-xs rounded-lg border bg-black"
+            style={{ aspectRatio: '9/16' }}
+            src={`/api/runs/${id}/media`}
+            preload="metadata"
+          />
+        </div>
+      )}
+
+      {/* Erreur d'assemblage */}
+      {manifest?.assemblyError && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+          Erreur assemblage : {manifest.assemblyError}
+        </div>
+      )}
+
+      {/* État réel du run (quand pas de playable) */}
+      {!hasPlayable && (
+        <div className="rounded-md border p-3 text-sm">
+          {hasClips ? (
+            <p className="text-amber-700">{completedClips.length} clip(s) présent(s) — assemblage non encore exécuté (step 7 non atteint).</p>
+          ) : hasStoryboard ? (
+            <p className="text-amber-700">Storyboard disponible. Pas de clips vidéo (providers non configurés). Aucun animatic assemblé.</p>
+          ) : (
+            <p className="text-muted-foreground">Aucun artefact visuel disponible. Le pipeline doit atteindre au moins le step 4 (Storyboard).</p>
+          )}
+        </div>
+      )}
 
       {/* Storyboard comme preview visuelle */}
       {hasStoryboard && (
