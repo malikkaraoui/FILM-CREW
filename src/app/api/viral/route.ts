@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { spawn } from 'child_process'
-import { mkdir, writeFile, readFile } from 'fs/promises'
+import { mkdir, writeFile, readFile, stat } from 'fs/promises'
 import { join } from 'path'
 import { executeWithFailover } from '@/lib/providers/failover'
 import type { LLMProvider } from '@/lib/providers/types'
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
       '--merge-output-format', 'mp4',
       '-o', join(viralDir, 'source.mp4'),
       '--no-playlist',
+      '--js-runtime', 'node',
       url,
     ], process.cwd())
 
@@ -103,7 +104,30 @@ Retourne UNIQUEMENT le JSON.`,
 
     await writeFile(join(viralDir, 'segments.json'), JSON.stringify(segments, null, 2))
 
-    logger.info({ event: 'viral_segments_detected', id })
+    // Écrire le viral-manifest.json (traçabilité source → segments → runs)
+    let sourceSizeBytes: number | undefined
+    try {
+      const s = await stat(join(viralDir, 'source.mp4'))
+      sourceSizeBytes = s.size
+    } catch { /* fichier absent en cas d'erreur download */ }
+
+    const segmentsArr = Array.isArray((segments as { segments: unknown[] }).segments)
+      ? (segments as { segments: unknown[] }).segments
+      : []
+
+    const viralManifest = {
+      id,
+      version: 1 as const,
+      url,
+      sourceDownloaded: true,
+      sourceSizeBytes,
+      segmentsCount: segmentsArr.length,
+      runsCreated: [] as string[],
+      generatedAt: new Date().toISOString(),
+    }
+    await writeFile(join(viralDir, 'viral-manifest.json'), JSON.stringify(viralManifest, null, 2))
+
+    logger.info({ event: 'viral_segments_detected', id, segmentsCount: segmentsArr.length })
 
     return NextResponse.json({
       data: {
