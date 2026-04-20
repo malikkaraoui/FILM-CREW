@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
 import { isAbsolute, join } from 'path'
-import { publishToTikTok, savePublishResult, readPublishResult, tiktokHealthCheck } from '@/lib/publishers/tiktok'
+import { savePublishResult, readPublishResult, tiktokHealthCheck } from '@/lib/publishers/tiktok'
+import { publishToPlatform, isSupportedPlatform, upsertPublishManifest, SUPPORTED_PUBLISH_PLATFORMS } from '@/lib/publishers/factory'
 import { logger } from '@/lib/logger'
 
 type PreviewManifest = {
@@ -13,7 +14,7 @@ type PreviewManifest = {
 
 /**
  * GET /api/runs/[id]/publish
- * Retourne le statut de publication actuel du run.
+ * Retourne le statut de publication actuel du run (publish-result.json).
  * Si aucun publish-result.json n'existe : { status: 'not_published' }.
  */
 export async function GET(
@@ -25,7 +26,6 @@ export async function GET(
     const result = await readPublishResult(id)
 
     if (!result) {
-      // Retourner le healthcheck TikTok pour informer l'UI sur l'état des credentials
       const health = await tiktokHealthCheck()
       return NextResponse.json({
         data: {
@@ -47,16 +47,18 @@ export async function GET(
 
 /**
  * POST /api/runs/[id]/publish
- * Déclenche la publication sur TikTok.
+ * Déclenche la publication sur la plateforme demandée.
  *
- * Body : { platform: 'tiktok' }
+ * Body : { platform: 'tiktok' | 'youtube_shorts' }
  *
  * Retourne toujours un PublishResult honnête :
- *   - NO_CREDENTIALS si TIKTOK_ACCESS_TOKEN absent
+ *   - NO_CREDENTIALS si le token plateforme est absent
  *   - NO_MEDIA si aucun fichier vidéo disponible
  *   - SUCCESS / PROCESSING / FAILED selon le résultat réel
  *
- * Le résultat est toujours persisté dans storage/runs/{id}/final/publish-result.json.
+ * Le résultat est persisté dans :
+ *   - storage/runs/{id}/final/publish-result.json  (dernière publication)
+ *   - storage/runs/{id}/publish-manifest.json       (historique multi-plateforme, upsert)
  */
 export async function POST(
   request: Request,
@@ -74,16 +76,21 @@ export async function POST(
     )
   }
 
-  if (body.platform !== 'tiktok') {
+  if (!isSupportedPlatform(body.platform)) {
     return NextResponse.json(
-      { error: { code: 'UNSUPPORTED_PLATFORM', message: `Plateforme "${body.platform}" non supportée. Seul "tiktok" est disponible.` } },
+      {
+        error: {
+          code: 'UNSUPPORTED_PLATFORM',
+          message: `Plateforme "${body.platform}" non supportée. Plateformes disponibles : ${SUPPORTED_PUBLISH_PLATFORMS.join(', ')}`,
+        },
+      },
       { status: 400 },
     )
   }
 
   const storagePath = join(process.cwd(), 'storage', 'runs', id)
 
-  logger.info({ event: 'publish_start', runId: id, platform: 'tiktok' })
+  logger.info({ event: 'publish_start', runId: id, platform: body.platform })
 
   // Lire le preview-manifest pour obtenir le fichier vidéo
   let previewManifest: PreviewManifest
@@ -92,12 +99,12 @@ export async function POST(
     previewManifest = JSON.parse(raw)
   } catch {
     const result = {
-      platform: 'tiktok' as const,
+      platform: body.platform as 'tiktok' | 'youtube_shorts',
       status: 'NO_MEDIA' as const,
       error: 'preview-manifest.json introuvable — le pipeline doit atteindre le step 7 avant publication',
       credentials: {
-        hasAccessToken: !!(process.env.TIKTOK_ACCESS_TOKEN),
-        hasClientKey: !!(process.env.TIKTOK_CLIENT_KEY),
+        hasAccessToken: false,
+        hasClientKey: false,
       },
       runId: id,
       title: '',
@@ -126,8 +133,8 @@ export async function POST(
       : join(process.cwd(), playableFilePath.replace(/^\//, '')))
     : join(storagePath, 'final', mode === 'video_finale' ? 'video.mp4' : 'animatic.mp4')
 
-  // Publier sur TikTok
-  const result = await publishToTikTok({
+  // Publier via le factory
+  const result = await publishToPlatform(body.platform, {
     runId: id,
     videoPath,
     title,
@@ -135,12 +142,18 @@ export async function POST(
     mediaMode: mode,
   })
 
-  // Persister le résultat (toujours, succès ou échec)
+  // Persister : publish-result.json (dernière pub) + publish-manifest.json (historique)
   await savePublishResult(id, result)
+  await upsertPublishManifest(id, result, { title, hashtags })
 
-  logger.info({ event: 'publish_complete', runId: id, status: result.status, publishId: result.publishId })
+  logger.info({
+    event: 'publish_complete',
+    runId: id,
+    platform: body.platform,
+    status: result.status,
+    publishId: result.publishId,
+  })
 
-  // Retourner le résultat avec le code HTTP approprié
   const httpStatus = result.status === 'SUCCESS' || result.status === 'PROCESSING'
     ? 200
     : result.status === 'NO_CREDENTIALS'

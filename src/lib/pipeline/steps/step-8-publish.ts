@@ -1,7 +1,8 @@
 import { readFile, writeFile } from 'fs/promises'
 import { isAbsolute, join } from 'path'
 import { logger } from '@/lib/logger'
-import { publishToTikTok, savePublishResult } from '@/lib/publishers/tiktok'
+import { savePublishResult } from '@/lib/publishers/tiktok'
+import { publishToPlatform, upsertPublishManifest } from '@/lib/publishers/factory'
 import type { PipelineStep, StepContext, StepResult } from '../types'
 
 type PreviewManifest = {
@@ -63,14 +64,14 @@ export const step8Publish: PipelineStep = {
       JSON.stringify(metadata, null, 2),
     )
 
-    // Tenter la publication TikTok si un fichier vidéo est disponible
+    // Tenter la publication TikTok (plateforme par défaut du pipeline)
     const videoPath = playableFilePath
       ? (isAbsolute(playableFilePath)
         ? playableFilePath
         : join(process.cwd(), playableFilePath.replace(/^\//, '')))
       : join(ctx.storagePath, 'final', mode === 'video_finale' ? 'video.mp4' : 'animatic.mp4')
 
-    const publishResult = await publishToTikTok({
+    const publishResult = await publishToPlatform('tiktok', {
       runId: ctx.runId,
       videoPath,
       title,
@@ -78,8 +79,9 @@ export const step8Publish: PipelineStep = {
       mediaMode: mode,
     })
 
-    // Persister le résultat de publication — toujours, succès ou NO_CREDENTIALS
+    // Persister : publish-result.json (dernière pub) + publish-manifest.json (historique)
     await savePublishResult(ctx.runId, publishResult)
+    await upsertPublishManifest(ctx.runId, publishResult, { title, hashtags })
 
     logger.info({
       event: 'publish_ready',

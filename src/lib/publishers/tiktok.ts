@@ -161,7 +161,8 @@ export type PublishStatus =
   | 'NO_MEDIA'
 
 export type PublishResult = {
-  platform: 'tiktok'
+  /** Plateforme de publication — étendu à 'youtube_shorts' en Lot 11B */
+  platform: 'tiktok' | 'youtube_shorts'
   status: PublishStatus
   publishId?: string
   videoId?: string
