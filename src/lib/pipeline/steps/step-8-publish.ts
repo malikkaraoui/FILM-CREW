@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { isAbsolute, join } from 'path'
 import { logger } from '@/lib/logger'
 import { publishToTikTok, savePublishResult } from '@/lib/publishers/tiktok'
 import type { PipelineStep, StepContext, StepResult } from '../types'
@@ -65,7 +65,9 @@ export const step8Publish: PipelineStep = {
 
     // Tenter la publication TikTok si un fichier vidéo est disponible
     const videoPath = playableFilePath
-      ? join(process.cwd(), playableFilePath.replace(/^\//, ''))
+      ? (isAbsolute(playableFilePath)
+        ? playableFilePath
+        : join(process.cwd(), playableFilePath.replace(/^\//, '')))
       : join(ctx.storagePath, 'final', mode === 'video_finale' ? 'video.mp4' : 'animatic.mp4')
 
     const publishResult = await publishToTikTok({

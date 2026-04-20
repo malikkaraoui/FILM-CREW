@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
-import { join } from 'path'
+import { isAbsolute, join } from 'path'
 import { publishToTikTok, savePublishResult, readPublishResult, tiktokHealthCheck } from '@/lib/publishers/tiktok'
 import { logger } from '@/lib/logger'
 
@@ -121,7 +121,9 @@ export async function POST(
 
   // Construire le chemin absolu du fichier vidéo
   const videoPath = playableFilePath
-    ? join(process.cwd(), playableFilePath.replace(/^\//, ''))
+    ? (isAbsolute(playableFilePath)
+      ? playableFilePath
+      : join(process.cwd(), playableFilePath.replace(/^\//, '')))
     : join(storagePath, 'final', mode === 'video_finale' ? 'video.mp4' : 'animatic.mp4')
 
   // Publier sur TikTok
