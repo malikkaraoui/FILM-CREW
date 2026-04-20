@@ -1,6 +1,6 @@
 import { db } from '../connection'
 import { run, runStep } from '../schema'
-import { eq, desc, or } from 'drizzle-orm'
+import { eq, desc, or, inArray } from 'drizzle-orm'
 
 const STEP_NAMES = [
   'Idée',
@@ -80,4 +80,13 @@ export async function updateRunCost(id: string, costEur: number) {
 
 export async function deleteRun(id: string) {
   await db.delete(run).where(eq(run.id, id))
+}
+
+/** Retourne les runs en attente (pending) et en cours (running) pour la vue queue (12A). */
+export async function getQueueRuns() {
+  return db
+    .select()
+    .from(run)
+    .where(inArray(run.status, ['pending', 'running']))
+    .orderBy(run.createdAt)
 }
