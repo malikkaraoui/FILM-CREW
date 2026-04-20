@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { getRuns, createRun, getActiveRun } from '@/lib/db/queries/runs'
 import { executePipeline } from '@/lib/pipeline/engine'
 import { logger } from '@/lib/logger'
-import { mkdir } from 'fs/promises'
+import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
+import { buildIntentionPrefix } from '@/lib/intention/schema'
 
 export async function GET() {
   try {
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { chainId, idea, template, type } = body
+    const { chainId, idea, template, type, intention } = body
 
     if (!chainId || !idea) {
       return NextResponse.json(
@@ -48,6 +49,20 @@ export async function POST(request: Request) {
     await mkdir(join(runPath, 'subtitles'), { recursive: true })
     await mkdir(join(runPath, 'storyboard'), { recursive: true })
     await mkdir(join(runPath, 'final'), { recursive: true })
+
+    // Persister intention.json si le questionnaire a été rempli
+    if (intention && typeof intention === 'object' && Object.keys(intention).length > 0) {
+      const intentionData = {
+        answers: intention,
+        prefix: buildIntentionPrefix(intention as Record<string, string>),
+        createdAt: new Date().toISOString(),
+      }
+      await writeFile(
+        join(runPath, 'intention.json'),
+        JSON.stringify(intentionData, null, 2),
+      )
+      logger.info({ event: 'intention_saved', runId: id, answeredCount: Object.keys(intention).length })
+    }
 
     // Fire-and-forget : le pipeline tourne en arrière-plan dans le process Node.js
     executePipeline(id).catch((e) => {

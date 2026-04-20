@@ -10,11 +10,15 @@ describe('Pipeline Steps', () => {
         idea: 'Test idea',
         brandKitPath: null,
         storagePath: '/tmp/test',
+        intentionPath: null,
       })
 
       expect(result.success).toBe(true)
       expect(result.costEur).toBe(0)
-      expect(result.outputData).toEqual({ idea: 'Test idea' })
+      const data = result.outputData as Record<string, unknown>
+      expect(data.idea).toBe('Test idea')
+      expect(data.hasIntention).toBe(false)
+      expect(data.answeredCount).toBe(0)
     })
 
     it('a le bon numéro d\'étape', () => {

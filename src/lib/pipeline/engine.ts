@@ -5,6 +5,7 @@ import { logger } from '@/lib/logger'
 import { db } from '@/lib/db/connection'
 import { runStep } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
+import { existsSync } from 'fs'
 import type { StepContext, PipelineStep } from './types'
 
 // Import des étapes
@@ -39,12 +40,18 @@ export async function executePipeline(runId: string): Promise<void> {
   const chain = await getChainById(run.chainId)
   if (!chain) throw new Error(`Chaîne ${run.chainId} introuvable`)
 
+  const storagePath = join(process.cwd(), 'storage', 'runs', runId)
+  const intentionPath = existsSync(join(storagePath, 'intention.json'))
+    ? join(storagePath, 'intention.json')
+    : null
+
   const ctx: StepContext = {
     runId,
     chainId: run.chainId,
     idea: run.idea,
     brandKitPath: chain.brandKitPath,
-    storagePath: join(process.cwd(), 'storage', 'runs', runId),
+    storagePath,
+    intentionPath,
   }
 
   const startStep = run.currentStep ?? 1

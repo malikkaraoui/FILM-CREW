@@ -4,6 +4,8 @@ export type StepContext = {
   idea: string
   brandKitPath: string | null
   storagePath: string
+  /** Chemin absolu vers intention.json — présent si le questionnaire 10B a été rempli */
+  intentionPath: string | null
 }
 
 export type StepResult = {

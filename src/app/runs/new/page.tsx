@@ -1,11 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { INTENTION_BLOCS, getVisibleQuestions } from '@/lib/intention/schema'
 import type { Chain } from '@/types/chain'
 
 type CostBreakdown = {
@@ -33,6 +35,11 @@ export default function NewRunPage() {
   const [templates, setTemplates] = useState<{ id: string; name: string; description: string }[]>([])
   const [templateId, setTemplateId] = useState('')
 
+  // Questionnaire adaptatif
+  const [showQuestionnaire, setShowQuestionnaire] = useState(false)
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [openBloc, setOpenBloc] = useState<string | null>(null)
+
   useEffect(() => {
     fetch('/api/chains')
       .then((r) => r.json())
@@ -57,15 +64,32 @@ export default function NewRunPage() {
       })
   }, [])
 
+  const handleAnswer = useCallback((questionId: string, value: string) => {
+    setAnswers((prev) => ({ ...prev, [questionId]: value }))
+  }, [])
+
+  const answeredCount = Object.keys(answers).length
+  const visibleQuestions = getVisibleQuestions(answers)
+
   async function handleLaunch() {
     if (!chainId || !idea.trim()) return
     setLaunching(true)
     setError('')
 
+    const body: Record<string, unknown> = {
+      chainId,
+      idea: idea.trim(),
+      template: templateId || undefined,
+    }
+
+    if (showQuestionnaire && answeredCount > 0) {
+      body.intention = answers
+    }
+
     const res = await fetch('/api/runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chainId, idea: idea.trim(), template: templateId || undefined }),
+      body: JSON.stringify(body),
     })
     const json = await res.json()
 
@@ -124,6 +148,88 @@ export default function NewRunPage() {
             </select>
           </div>
         )}
+
+        {/* Questionnaire adaptatif */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowQuestionnaire((v) => !v)}
+            className="flex w-full items-center justify-between rounded-md border border-input px-3 py-2 text-sm hover:bg-accent"
+          >
+            <span className="flex items-center gap-2">
+              <span>Affiner avec le questionnaire</span>
+              {answeredCount > 0 && (
+                <Badge variant="secondary" className="text-[10px]">
+                  {answeredCount}/{visibleQuestions.length}
+                </Badge>
+              )}
+            </span>
+            <span className="text-muted-foreground">{showQuestionnaire ? '▲' : '▼'}</span>
+          </button>
+
+          {showQuestionnaire && (
+            <div className="mt-2 space-y-2">
+              {INTENTION_BLOCS.map((bloc) => {
+                const blocVisible = bloc.questions.filter((q) => {
+                  if (!q.showIf) return true
+                  return answers[q.showIf.questionId] === q.showIf.value
+                })
+                const blocAnswered = blocVisible.filter((q) => answers[q.id]).length
+                const isOpen = openBloc === bloc.id
+
+                return (
+                  <div key={bloc.id} className="rounded-md border border-input overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setOpenBloc(isOpen ? null : bloc.id)}
+                      className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-accent"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="font-medium">{bloc.label}</span>
+                        <span className="text-xs text-muted-foreground">{bloc.description}</span>
+                        {blocAnswered > 0 && (
+                          <Badge variant="default" className="text-[9px]">
+                            {blocAnswered}/{blocVisible.length}
+                          </Badge>
+                        )}
+                      </span>
+                      <span className="text-muted-foreground text-xs">{isOpen ? '▲' : '▼'}</span>
+                    </button>
+
+                    {isOpen && (
+                      <div className="px-3 pb-3 pt-1 space-y-3 bg-muted/20">
+                        {blocVisible.map((question) => (
+                          <div key={question.id}>
+                            <p className="text-xs font-medium mb-1.5 text-muted-foreground">
+                              {question.label}
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {question.options.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => handleAnswer(question.id, opt.value)}
+                                  className={[
+                                    'rounded-full border px-2.5 py-0.5 text-xs transition-colors',
+                                    answers[question.id] === opt.value
+                                      ? 'bg-primary text-primary-foreground border-primary'
+                                      : 'border-input hover:bg-accent',
+                                  ].join(' ')}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Estimation de coût */}
         <Card>
