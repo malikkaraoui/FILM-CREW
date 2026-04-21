@@ -1,6 +1,6 @@
 import { db } from '../connection'
 import { run, runStep } from '../schema'
-import { eq, desc, or, inArray } from 'drizzle-orm'
+import { eq, desc, or, inArray, and, lt, isNull } from 'drizzle-orm'
 
 const STEP_NAMES = [
   'Idée',
@@ -80,6 +80,30 @@ export async function updateRunCost(id: string, costEur: number) {
 
 export async function deleteRun(id: string) {
   await db.delete(run).where(eq(run.id, id))
+}
+
+/** Retourne les runs zombies : status='running' avec heartbeat stale (>5min) ou absent (12C). */
+export async function getZombieRuns(thresholdMs = 5 * 60_000) {
+  const cutoff = new Date(Date.now() - thresholdMs)
+  return db
+    .select()
+    .from(run)
+    .where(
+      and(
+        eq(run.status, 'running'),
+        or(isNull(run.lastHeartbeat), lt(run.lastHeartbeat, cutoff)),
+      ),
+    )
+}
+
+/** Marque un run comme failed avec un message d'erreur explicite (12C). */
+export async function markRunFailed(id: string, error: string) {
+  const [row] = await db
+    .update(run)
+    .set({ status: 'failed', updatedAt: new Date() })
+    .where(eq(run.id, id))
+    .returning()
+  return row ?? null
 }
 
 /** Retourne les runs en attente (pending) et en cours (running) pour la vue queue (12A). */

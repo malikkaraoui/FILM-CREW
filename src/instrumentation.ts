@@ -3,5 +3,9 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     const { bootstrapProviders } = await import('@/lib/providers/bootstrap')
     bootstrapProviders()
+
+    // Recovery automatique des runs zombies au démarrage (12C)
+    const { recoverZombies } = await import('@/lib/pipeline/recovery')
+    recoverZombies().catch(() => { /* best-effort — ne pas bloquer le démarrage */ })
   }
 }
