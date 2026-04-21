@@ -70,6 +70,13 @@ export async function executePipeline(runId: string): Promise<void> {
   for (let i = startStep - 1; i < STEPS.length; i++) {
     const step = STEPS[i]
 
+    // Kill check — relire le statut avant chaque step (12B)
+    const freshRun = await getRunById(runId)
+    if (freshRun?.status === 'killed') {
+      logger.info({ event: 'pipeline_killed', runId, atStep: step.stepNumber })
+      return
+    }
+
     // Mettre à jour le statut de l'étape
     await updateStepStatus(runId, step.stepNumber, 'running')
     await updateRunStatus(runId, 'running', step.stepNumber)
