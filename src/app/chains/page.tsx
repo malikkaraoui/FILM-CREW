@@ -99,7 +99,7 @@ export default function ChainsPage() {
                     </CardDescription>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Link href="/runs/new">
+                    <Link href={`/runs/new?chainId=${c.id}`}>
                       <Button variant="outline" size="sm" className="h-7 text-xs">Lancer</Button>
                     </Link>
                     <Button variant="ghost" size="sm" onClick={() => handleDelete(c.id)} className="text-destructive">

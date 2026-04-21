@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState, useCallback, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,8 +23,9 @@ type CostEstimate = {
   warning: string | null
 }
 
-export default function NewRunPage() {
+function NewRunForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [chains, setChains] = useState<Chain[]>([])
   const [chainId, setChainId] = useState('')
   const [idea, setIdea] = useState('')
@@ -46,7 +47,13 @@ export default function NewRunPage() {
       .then((json) => {
         if (json.data) {
           setChains(json.data)
-          if (json.data.length > 0) setChainId(json.data[0].id)
+          const preselect = searchParams?.get('chainId')
+          const match = preselect ? (json.data as Chain[]).find((c) => c.id === preselect) : null
+          if (match) {
+            setChainId(match.id)
+          } else if ((json.data as Chain[]).length > 0) {
+            setChainId((json.data as Chain[])[0].id)
+          }
         }
       })
 
@@ -62,7 +69,7 @@ export default function NewRunPage() {
       .then((json) => {
         if (json.data) setTemplates(json.data)
       })
-  }, [])
+  }, [searchParams])
 
   const handleAnswer = useCallback((questionId: string, value: string) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
@@ -281,5 +288,13 @@ export default function NewRunPage() {
         </Button>
       </div>
     </div>
+  )
+}
+
+export default function NewRunPage() {
+  return (
+    <Suspense>
+      <NewRunForm />
+    </Suspense>
   )
 }
