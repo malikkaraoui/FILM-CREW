@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { ThemeToggle } from './theme-toggle'
 import { Badge } from '@/components/ui/badge'
 
@@ -50,17 +51,17 @@ export function Topbar() {
 
   const loadActiveRun = async () => {
     try {
-      const res = await fetch('/api/runs/recovery')
+      const res = await fetch('/api/queue')
       const json = await res.json()
-      if (json.data && json.data.status === 'running') {
-        setActiveRun(json.data)
+      if (json.data?.active) {
+        setActiveRun(json.data.active)
         const configRes = await fetch('/api/config')
         const configJson = await configRes.json()
         if (configJson.data) {
           const alertCfg = configJson.data.find((c: { key: string }) => c.key === 'cost_alert_per_run')
           if (alertCfg) {
             const threshold = parseFloat(alertCfg.value) * 0.8
-            setCostAlert((json.data.costEur ?? 0) >= threshold)
+            setCostAlert((json.data.active.costEur ?? 0) >= threshold)
           }
         }
       } else {
@@ -101,10 +102,16 @@ export function Topbar() {
 
           {activeRun && (
             <div className="flex items-center gap-2 text-xs">
+              <Link
+                href={`/runs/${activeRun.id}`}
+                className="max-w-30 truncate text-muted-foreground hover:underline"
+              >
+                {activeRun.idea}
+              </Link>
               <span className="text-muted-foreground">
                 Étape {activeRun.currentStep}/8
               </span>
-              <span className={`font-mono ${costAlert ? 'text-red-500 animate-pulse font-bold' : 'text-muted-foreground'}`}>
+              <span className={`font-mono ${costAlert ? 'animate-pulse font-bold text-red-500' : 'text-muted-foreground'}`}>
                 {(activeRun.costEur ?? 0).toFixed(2)} €
               </span>
             </div>

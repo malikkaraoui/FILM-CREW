@@ -4,15 +4,39 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import type { Run } from '@/types/run'
+import type { Chain } from '@/types/chain'
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'En attente',
+  running: 'En cours',
+  completed: 'Terminé',
+  failed: 'Échoué',
+  killed: 'Arrêté',
+}
+
+const STATUS_CLASSES: Record<string, string> = {
+  pending: 'text-amber-500',
+  running: 'text-blue-500',
+  completed: 'text-green-600',
+  failed: 'text-red-500',
+  killed: 'text-muted-foreground',
+}
 
 export default function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([])
+  const [chains, setChains] = useState<Chain[]>([])
 
   useEffect(() => {
     fetch('/api/runs')
       .then((r) => r.json())
       .then((json) => { if (json.data) setRuns(json.data) })
+
+    fetch('/api/chains')
+      .then((r) => r.json())
+      .then((json) => { if (json.data) setChains(json.data) })
   }, [])
+
+  const chainMap = Object.fromEntries(chains.map((c) => [c.id, c]))
 
   return (
     <div>
@@ -32,6 +56,7 @@ export default function RunsPage() {
           <thead>
             <tr className="border-b text-left text-muted-foreground">
               <th className="py-2 font-medium">Idée</th>
+              <th className="py-2 font-medium">Chaîne</th>
               <th className="py-2 font-medium">Statut</th>
               <th className="py-2 font-medium">Coût</th>
               <th className="py-2 font-medium">Date</th>
@@ -45,10 +70,24 @@ export default function RunsPage() {
                     {r.idea}
                   </Link>
                 </td>
-                <td className="py-2">{r.status}</td>
-                <td className="py-2">{(r.costEur ?? 0).toFixed(2)} €</td>
+                <td className="py-2 text-muted-foreground">
+                  {chainMap[r.chainId]
+                    ? <Link href={`/chains/${r.chainId}`} className="hover:underline">{chainMap[r.chainId].name}</Link>
+                    : <span className="text-xs">{r.chainId.slice(0, 8)}…</span>
+                  }
+                </td>
                 <td className="py-2">
-                  {r.createdAt ? new Date(r.createdAt).toLocaleDateString('fr-FR') : '-'}
+                  <span className={`font-medium ${STATUS_CLASSES[r.status] ?? ''}`}>
+                    {r.status === 'running' && r.currentStep
+                      ? `Étape ${r.currentStep}/8`
+                      : (STATUS_LABELS[r.status] ?? r.status)}
+                  </span>
+                </td>
+                <td className="py-2 font-mono">{(r.costEur ?? 0).toFixed(2)} €</td>
+                <td className="py-2 text-muted-foreground">
+                  {r.createdAt
+                    ? new Date(r.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+                    : '-'}
                 </td>
               </tr>
             ))}
