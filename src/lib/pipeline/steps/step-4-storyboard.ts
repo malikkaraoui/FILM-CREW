@@ -1,7 +1,10 @@
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { executeWithFailover } from '@/lib/providers/failover'
-import type { ImageProvider } from '@/lib/providers/types'
+import {
+  storyboardLocalProvider,
+  buildLocalStoryboardPrompt,
+  composeStoryboardBoard,
+} from '@/lib/providers/image/storyboard-local'
 import { logger } from '@/lib/logger'
 import type { PipelineStep, StepContext, StepResult } from '../types'
 
@@ -17,8 +20,12 @@ type Scene = {
 type StoryboardImage = {
   sceneIndex: number
   description: string
+  prompt: string
   filePath: string
   status: 'pending' | 'generated' | 'validated' | 'rejected'
+  providerUsed?: string | null
+  failoverOccurred?: boolean
+  isPlaceholder?: boolean
 }
 
 export const step4Storyboard: PipelineStep = {
@@ -44,26 +51,35 @@ export const step4Storyboard: PipelineStep = {
     let totalCost = 0
 
     for (const scene of structure.scenes) {
-      const prompt = `${scene.description}. ${scene.lighting}. ${scene.camera}. Style: cinématique, vidéo courte.`
+      const prompt = buildLocalStoryboardPrompt({
+        sceneIndex: scene.index,
+        description: scene.description,
+        lighting: scene.lighting,
+        camera: scene.camera,
+        durationS: scene.duration_s,
+        dialogue: scene.dialogue,
+      })
 
       try {
         const storyboardDir = join(ctx.storagePath, 'storyboard')
-        const { result } = await executeWithFailover(
-          'image',
-          async (p) => {
-            const img = p as ImageProvider
-            return img.generate(prompt, { width: 768, height: 1344, style: 'cinematic', outputDir: storyboardDir })
-          },
-          ctx.runId,
-        )
+        const result = await storyboardLocalProvider.generate(prompt, {
+          width: 1280,
+          height: 720,
+          style: 'storyboard-rough-local',
+          outputDir: storyboardDir,
+        })
 
         totalCost += result.costEur
 
         images.push({
           sceneIndex: scene.index,
           description: scene.description,
+          prompt,
           filePath: result.filePath,
           status: 'generated',
+          providerUsed: storyboardLocalProvider.name,
+          failoverOccurred: false,
+          isPlaceholder: false,
         })
       } catch (e) {
         logger.warn({
@@ -80,28 +96,56 @@ export const step4Storyboard: PipelineStep = {
         images.push({
           sceneIndex: scene.index,
           description: scene.description,
+          prompt,
           filePath: placeholderPath,
           status: 'pending',
+          providerUsed: null,
+          failoverOccurred: false,
+          isPlaceholder: true,
         })
       }
     }
 
+    let boardFilePath: string | null = null
+    let boardLayout: string | null = null
+    try {
+      const board = await composeStoryboardBoard(images, join(ctx.storagePath, 'storyboard'))
+      boardFilePath = board.filePath
+      boardLayout = `${board.columns}x${board.rows}`
+    } catch (e) {
+      logger.warn({
+        event: 'storyboard_board_failed',
+        runId: ctx.runId,
+        error: (e as Error).message,
+      })
+    }
+
     // Sauvegarder le manifest storyboard
-    const manifest = { images, generatedAt: new Date().toISOString() }
+    const manifest = {
+      images,
+      boardFilePath,
+      boardLayout,
+      generatedAt: new Date().toISOString(),
+    }
     await writeFile(
       join(ctx.storagePath, 'storyboard', 'manifest.json'),
       JSON.stringify(manifest, null, 2),
     )
 
-    const allGenerated = images.every((img) => img.status === 'generated')
+    const realGenerated = images.filter((img) => img.status === 'generated' && !img.isPlaceholder)
+    const placeholderCount = images.filter((img) => img.isPlaceholder).length
+    const allGenerated = images.every((img) => img.status === 'generated' && !img.isPlaceholder)
 
     return {
       success: true, // on continue même si certaines images ont échoué
       costEur: totalCost,
       outputData: {
         imageCount: images.length,
-        generatedCount: images.filter((i) => i.status === 'generated').length,
+        generatedCount: realGenerated.length,
+        placeholderCount,
         allGenerated,
+        boardFilePath,
+        boardLayout,
       },
     }
   },

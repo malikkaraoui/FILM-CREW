@@ -1,6 +1,16 @@
 import { NextResponse } from 'next/server'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
+import { buildLocalStoryboardPrompt } from '@/lib/providers/image/storyboard-local'
+
+function buildStoryboardPrompt(scene: { index: number; description: string; lighting: string; camera: string }): string {
+  return buildLocalStoryboardPrompt({
+    sceneIndex: scene.index,
+    description: scene.description,
+    lighting: scene.lighting,
+    camera: scene.camera,
+  })
+}
 
 export async function GET(
   _request: Request,
@@ -10,7 +20,36 @@ export async function GET(
     const { id } = await params
     const manifestPath = join(process.cwd(), 'storage', 'runs', id, 'storyboard', 'manifest.json')
     const raw = await readFile(manifestPath, 'utf-8')
-    return NextResponse.json({ data: JSON.parse(raw) })
+    const manifest = JSON.parse(raw) as {
+      images: Array<{ sceneIndex: number; description: string; prompt?: string; filePath: string; status: string; providerUsed?: string | null; failoverOccurred?: boolean; isPlaceholder?: boolean }>
+      boardFilePath?: string | null
+      boardLayout?: string | null
+    }
+
+    try {
+      const structurePath = join(process.cwd(), 'storage', 'runs', id, 'structure.json')
+      const structure = JSON.parse(await readFile(structurePath, 'utf-8')) as {
+        scenes?: Array<{ index: number; description: string; lighting: string; camera: string }>
+      }
+      for (const image of manifest.images ?? []) {
+        const inferredPlaceholder = image.isPlaceholder || image.filePath.includes('placeholder-') || image.filePath.endsWith('.txt')
+        image.isPlaceholder = inferredPlaceholder
+        if (inferredPlaceholder && image.status === 'generated') {
+          image.status = 'pending'
+        }
+
+        if (!image.prompt) {
+          const scene = structure.scenes?.find((item) => item.index === image.sceneIndex)
+          if (scene) {
+            image.prompt = buildStoryboardPrompt(scene)
+          }
+        }
+      }
+    } catch {
+      // on garde le manifest brut
+    }
+
+    return NextResponse.json({ data: manifest })
   } catch {
     return NextResponse.json({ data: { images: [] } })
   }
@@ -23,7 +62,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { sceneIndex, description, status } = body
+    const { sceneIndex, description, status, prompt } = body
 
     const manifestPath = join(process.cwd(), 'storage', 'runs', id, 'storyboard', 'manifest.json')
     const raw = await readFile(manifestPath, 'utf-8')
@@ -39,6 +78,7 @@ export async function PATCH(
 
     if (description !== undefined) image.description = description
     if (status !== undefined) image.status = status
+    if (prompt !== undefined) image.prompt = prompt
 
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
     return NextResponse.json({ data: image })

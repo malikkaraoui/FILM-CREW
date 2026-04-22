@@ -5,14 +5,19 @@ import { db } from '@/lib/db/connection'
 import { clip } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { executeWithFailover, persistRegenerationAttempt, FailoverError } from '@/lib/providers/failover'
-import type { ImageProvider, VideoProvider } from '@/lib/providers/types'
+import {
+  storyboardLocalProvider,
+  buildLocalStoryboardPrompt,
+  composeStoryboardBoard,
+} from '@/lib/providers/image/storyboard-local'
+import type { VideoProvider } from '@/lib/providers/types'
 import { logger } from '@/lib/logger'
 
 /**
  * POST /api/runs/[id]/regenerate-scene
  * Régénère une scène ciblée (storyboard ou vidéo) sans relancer toute la chaîne.
  *
- * Body : { type: 'storyboard' | 'video', sceneIndex: number }
+ * Body : { type: 'storyboard' | 'video', sceneIndex: number, prompt?: string, negativePrompt?: string }
  *
  * Retourne :
  *   { providerUsed, failoverOccurred, failoverChain?, artefactPath, previousArtefactPath }
@@ -23,7 +28,7 @@ export async function POST(
 ) {
   const { id } = await params
 
-  let body: { type: 'storyboard' | 'video'; sceneIndex: number }
+  let body: { type: 'storyboard' | 'video'; sceneIndex: number; prompt?: string; negativePrompt?: string }
   try {
     body = await request.json()
   } catch {
@@ -33,7 +38,7 @@ export async function POST(
     )
   }
 
-  const { type, sceneIndex } = body
+  const { type, sceneIndex, prompt, negativePrompt } = body
   if (!type || typeof sceneIndex !== 'number') {
     return NextResponse.json(
       { error: { code: 'BAD_REQUEST', message: 'type et sceneIndex requis' } },
@@ -52,9 +57,9 @@ export async function POST(
   logger.info({ event: 'regenerate_scene_start', runId: id, type, sceneIndex })
 
   if (type === 'storyboard') {
-    return regenerateStoryboardScene(id, sceneIndex, storagePath)
+    return regenerateStoryboardScene(id, sceneIndex, storagePath, prompt)
   }
-  return regenerateVideoScene(id, sceneIndex, storagePath)
+  return regenerateVideoScene(id, sceneIndex, storagePath, prompt, negativePrompt)
 }
 
 // ─── Régénération storyboard ───────────────────────────────────────────────
@@ -63,10 +68,15 @@ async function regenerateStoryboardScene(
   runId: string,
   sceneIndex: number,
   storagePath: string,
+  customPrompt?: string,
 ): Promise<Response> {
   // Lire le manifest storyboard pour trouver la scène et son prompt
   const manifestPath = join(storagePath, 'storyboard', 'manifest.json')
-  let manifest: { images: { sceneIndex: number; description: string; filePath: string; status: string }[] }
+  let manifest: {
+    images: { sceneIndex: number; description: string; prompt?: string; filePath: string; status: string; providerUsed?: string | null; failoverOccurred?: boolean; isPlaceholder?: boolean }[]
+    boardFilePath?: string | null
+    boardLayout?: string | null
+  }
 
   try {
     manifest = JSON.parse(await readFile(manifestPath, 'utf-8'))
@@ -86,7 +96,42 @@ async function regenerateStoryboardScene(
   }
 
   const previousArtefactPath = image.filePath
-  const prompt = image.description
+  let structureScene: {
+    index: number
+    description: string
+    lighting: string
+    camera: string
+    duration_s?: number
+    dialogue?: string
+  } | null = null
+  try {
+    const structure = JSON.parse(await readFile(join(storagePath, 'structure.json'), 'utf-8')) as {
+      scenes?: Array<{
+        index: number
+        description: string
+        lighting: string
+        camera: string
+        duration_s?: number
+        dialogue?: string
+      }>
+    }
+    structureScene = structure.scenes?.find((scene) => scene.index === sceneIndex) ?? null
+  } catch {
+    structureScene = null
+  }
+
+  const rawPrompt = customPrompt?.trim() || image.prompt || image.description
+  const prompt = /(^|\n)(Scene|Description|Lighting|Camera):/i.test(rawPrompt)
+    ? rawPrompt
+    : buildLocalStoryboardPrompt({
+        sceneIndex,
+        description: customPrompt?.trim() || structureScene?.description || image.description,
+        lighting: structureScene?.lighting || 'Natural light',
+        camera: structureScene?.camera || 'Static camera',
+        durationS: structureScene?.duration_s,
+        dialogue: structureScene?.dialogue,
+      })
+  image.prompt = prompt
 
   const storyboardDir = join(storagePath, 'storyboard')
   await mkdir(storyboardDir, { recursive: true })
@@ -98,28 +143,28 @@ async function regenerateStoryboardScene(
   let regenerationError: string | null = null
 
   try {
-    const { result, provider, failover } = await executeWithFailover(
-      'image',
-      async (p) => {
-        const img = p as ImageProvider
-        return img.generate(
-          `${prompt}. Style: cinématique, vidéo courte.`,
-          { width: 768, height: 1344, style: 'cinematic', outputDir: storyboardDir },
-        )
-      },
-      runId,
+    const result = await storyboardLocalProvider.generate(
+      prompt,
+      { width: 1280, height: 720, style: 'storyboard-rough-local', outputDir: storyboardDir },
     )
 
-    providerUsed = provider.name
-    failoverOccurred = !!failover
-    failoverChain = failover
-      ? { original: failover.original, fallback: failover.fallback, reason: failover.reason }
-      : undefined
+    providerUsed = storyboardLocalProvider.name
+    failoverOccurred = false
+    failoverChain = undefined
     artefactPath = result.filePath
+
+    const isPlaceholder = false
 
     // Mettre à jour le manifest storyboard
     image.filePath = result.filePath
-    image.status = 'generated'
+    image.status = isPlaceholder ? 'pending' : 'generated'
+    image.providerUsed = storyboardLocalProvider.name
+    image.failoverOccurred = false
+    image.isPlaceholder = isPlaceholder
+
+    const board = await composeStoryboardBoard(manifest.images, storyboardDir)
+    manifest.boardFilePath = board.filePath
+    manifest.boardLayout = `${board.columns}x${board.rows}`
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
 
     logger.info({
@@ -189,9 +234,11 @@ async function regenerateVideoScene(
   runId: string,
   sceneIndex: number,
   storagePath: string,
+  customPrompt?: string,
+  customNegativePrompt?: string,
 ): Promise<Response> {
   // Lire prompts.json pour récupérer le prompt de la scène
-  let promptData: { prompts: { sceneIndex: number; prompt: string }[] }
+  let promptData: { prompts: { sceneIndex: number; prompt: string; negativePrompt?: string }[] }
   try {
     promptData = JSON.parse(await readFile(join(storagePath, 'prompts.json'), 'utf-8'))
   } catch {
@@ -207,6 +254,31 @@ async function regenerateVideoScene(
       { error: { code: 'SCENE_NOT_FOUND', message: `Scène ${sceneIndex} absente des prompts` } },
       { status: 404 },
     )
+  }
+
+  if (customPrompt?.trim()) {
+    entry.prompt = customPrompt.trim()
+  }
+  if (customNegativePrompt !== undefined) {
+    entry.negativePrompt = customNegativePrompt
+  }
+  await writeFile(join(storagePath, 'prompts.json'), JSON.stringify(promptData, null, 2))
+
+  try {
+    const promptManifestPath = join(storagePath, 'prompt-manifest.json')
+    const promptManifest = JSON.parse(await readFile(promptManifestPath, 'utf-8')) as {
+      prompts?: Array<{ sceneIndex: number; prompt: string; negativePrompt?: string }>
+    }
+    const manifestEntry = promptManifest.prompts?.find((p) => p.sceneIndex === sceneIndex)
+    if (manifestEntry) {
+      manifestEntry.prompt = entry.prompt
+      if (customNegativePrompt !== undefined) {
+        manifestEntry.negativePrompt = customNegativePrompt
+      }
+      await writeFile(promptManifestPath, JSON.stringify(promptManifest, null, 2))
+    }
+  } catch {
+    // non bloquant
   }
 
   // Trouver le clip précédent en DB pour tracer "avant/après"
@@ -230,6 +302,9 @@ async function regenerateVideoScene(
       'video',
       async (p) => {
         const video = p as VideoProvider
+        if (video.name === 'sketch-local') {
+          throw new Error('sketch-local est désactivé pour le pipeline standard : brouillon texte local non acceptable comme clip final')
+        }
         return video.generate(entry.prompt, {
           resolution: '720p',
           duration: 10,

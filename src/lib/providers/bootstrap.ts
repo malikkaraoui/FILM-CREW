@@ -11,6 +11,7 @@ import { piperProvider } from './tts/piper'
 import { systemTtsProvider } from './tts/system-tts'
 import { stabilityProvider } from './image/stability'
 import { falImageProvider } from './image/fal'
+import { storyboardLocalProvider } from './image/storyboard-local'
 import { localPlaceholderProvider } from './image/local-placeholder'
 import { pexelsProvider } from './stock/pexels'
 import { pixabayProvider } from './stock/pixabay'
@@ -63,7 +64,8 @@ export function bootstrapProviders(): void {
     }
   }
 
-  // Image (storyboard) — FAL FLUX en priorité, Stability en fallback, local-placeholder en dernier recours
+  // Image (storyboard) — rough local en priorité pour l'étape 4, puis cloud si besoin, placeholder en dernier recours
+  registry.register(storyboardLocalProvider)
   registry.register(falImageProvider)
   registry.register(stabilityProvider)
   registry.register(localPlaceholderProvider)

@@ -7,16 +7,25 @@ import { Badge } from '@/components/ui/badge'
 type StoryboardImage = {
   sceneIndex: number
   description: string
+  prompt?: string
   filePath: string
   status: 'pending' | 'generated' | 'validated' | 'rejected'
+  providerUsed?: string | null
+  failoverOccurred?: boolean
+  isPlaceholder?: boolean
 }
 
 type Props = {
+  runId: string
   images: StoryboardImage[]
+  boardFilePath?: string | null
+  boardLayout?: string | null
   onValidate: (sceneIndex: number) => void
   onReject: (sceneIndex: number) => void
   onValidateAll: () => void
   onEditDescription: (sceneIndex: number, description: string) => void
+  onEditPrompt: (sceneIndex: number, prompt: string) => void
+  onRegenerate: (sceneIndex: number, prompt?: string) => void
 }
 
 const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -26,9 +35,10 @@ const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'second
   rejected: { label: 'À refaire', variant: 'destructive' },
 }
 
-export function StoryboardGrid({ images, onValidate, onReject, onValidateAll, onEditDescription }: Props) {
+export function StoryboardGrid({ runId, images, boardFilePath, boardLayout, onValidate, onReject, onValidateAll, onEditDescription, onEditPrompt, onRegenerate }: Props) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
+  const [promptDrafts, setPromptDrafts] = useState<Record<number, string>>({})
 
   function startEdit(img: StoryboardImage) {
     setEditingIndex(img.sceneIndex)
@@ -38,6 +48,10 @@ export function StoryboardGrid({ images, onValidate, onReject, onValidateAll, on
   function saveEdit(sceneIndex: number) {
     onEditDescription(sceneIndex, editText)
     setEditingIndex(null)
+  }
+
+  function getPromptDraft(img: StoryboardImage): string {
+    return promptDrafts[img.sceneIndex] ?? img.prompt ?? img.description
   }
 
   if (images.length === 0) {
@@ -66,10 +80,34 @@ export function StoryboardGrid({ images, onValidate, onReject, onValidateAll, on
         </div>
       </div>
 
+      {images.some((img) => img.isPlaceholder || img.filePath.includes('placeholder-')) && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          Certaines vignettes storyboard sont des placeholders locaux. Ce ne sont pas de vraies images générées : les providers image ont échoué et il faut régénérer ces scènes pour obtenir un vrai storyboard.
+        </div>
+      )}
+
+      {boardFilePath && (
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">Planche storyboard</h3>
+            {boardLayout && <Badge variant="outline">{boardLayout}</Badge>}
+          </div>
+          <div className="overflow-hidden rounded-md border bg-white">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`/api/runs/${runId}/storyboard/board`}
+              alt="Planche storyboard"
+              className="h-auto w-full object-contain"
+            />
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-4">
         {images.map((img) => {
           const badge = STATUS_BADGE[img.status] ?? STATUS_BADGE.pending
           const isEditing = editingIndex === img.sceneIndex
+          const isPlaceholder = img.isPlaceholder || img.filePath.includes('placeholder-') || img.filePath.endsWith('.txt')
 
           return (
             <div
@@ -77,20 +115,25 @@ export function StoryboardGrid({ images, onValidate, onReject, onValidateAll, on
               className="rounded-lg border overflow-hidden"
             >
               {/* Vignette — placeholder ou image */}
-              <div className="aspect-[9/16] bg-muted flex items-center justify-center relative">
+              <div className="aspect-video bg-muted flex items-center justify-center relative">
                 <span className="absolute top-2 left-2 rounded-full bg-background/80 px-2 py-0.5 text-xs font-mono">
                   {img.sceneIndex}
                 </span>
-                {img.filePath.endsWith('.txt') ? (
-                  <span className="text-xs text-muted-foreground px-4 text-center">
-                    Image en attente
-                  </span>
+                {isPlaceholder ? (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center">
+                    <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      Placeholder local
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Pas une vraie image storyboard. Les providers image ont échoué.
+                    </span>
+                  </div>
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={`/api/storage/${encodeURIComponent(img.filePath)}`}
+                    src={`/api/runs/${runId}/storyboard/image/${img.sceneIndex}`}
                     alt={`Scène ${img.sceneIndex}`}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain bg-white"
                   />
                 )}
               </div>
@@ -99,14 +142,23 @@ export function StoryboardGrid({ images, onValidate, onReject, onValidateAll, on
               <div className="p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <Badge variant={badge.variant}>{badge.label}</Badge>
+                  {isPlaceholder && (
+                    <Badge variant="destructive">fake / placeholder</Badge>
+                  )}
                 </div>
+
+                {isPlaceholder && (
+                  <p className="text-[10px] text-amber-700">
+                    Cette scène n’a pas de vraie vignette. Clique sur régénérer avec un provider image réel.
+                  </p>
+                )}
 
                 {isEditing ? (
                   <div className="space-y-1">
                     <textarea
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
-                      className="w-full min-h-[60px] rounded-md border bg-transparent px-2 py-1 text-xs"
+                      className="w-full min-h-15 rounded-md border bg-transparent px-2 py-1 text-xs"
                       autoFocus
                     />
                     <div className="flex gap-1">
@@ -128,13 +180,40 @@ export function StoryboardGrid({ images, onValidate, onReject, onValidateAll, on
                   </p>
                 )}
 
+                <div className="space-y-1 rounded-md border bg-muted/30 p-2">
+                  <div className="text-[10px] font-medium text-foreground">Prompt storyboard</div>
+                  <textarea
+                    value={getPromptDraft(img)}
+                    onChange={(e) => setPromptDrafts((prev) => ({ ...prev, [img.sceneIndex]: e.target.value }))}
+                    className="w-full min-h-24 rounded-md border bg-background px-2 py-1 text-[11px]"
+                  />
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-[10px] h-6 flex-1"
+                      onClick={() => onEditPrompt(img.sceneIndex, getPromptDraft(img))}
+                    >
+                      Sauver prompt
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-[10px] h-6 flex-1"
+                      onClick={() => onRegenerate(img.sceneIndex, getPromptDraft(img))}
+                    >
+                      Régénérer avec ce prompt
+                    </Button>
+                  </div>
+                </div>
+
                 <div className="flex gap-1">
                   <Button
                     size="sm"
                     variant="outline"
                     className="text-xs h-6 flex-1"
                     onClick={() => onValidate(img.sceneIndex)}
-                    disabled={img.status === 'validated'}
+                    disabled={img.status === 'validated' || isPlaceholder}
                   >
                     Valider
                   </Button>

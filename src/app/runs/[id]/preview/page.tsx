@@ -11,6 +11,7 @@ type Clip = {
   id: string
   stepIndex: number
   prompt: string
+  negativePrompt?: string | null
   provider: string
   status: string
   filePath: string | null
@@ -23,6 +24,9 @@ type StoryboardImage = {
   description: string
   filePath: string
   status: 'pending' | 'generated' | 'validated' | 'rejected'
+  providerUsed?: string | null
+  failoverOccurred?: boolean
+  isPlaceholder?: boolean
 }
 
 type PreviewManifest = {
@@ -86,12 +90,30 @@ export default function PreviewPage() {
   const [directorPlan, setDirectorPlan] = useState<DirectorPlan | null>(null)
   const [regenerating, setRegenerating] = useState<Record<number, boolean>>({})
   const [regenResult, setRegenResult] = useState<Record<number, { ok: boolean; provider: string; failover: boolean; error?: string }>>({})
+  const [promptDrafts, setPromptDrafts] = useState<Record<number, { prompt: string; negativePrompt: string }>>({})
 
   const loadClips = useCallback(async () => {
     try {
       const res = await fetch(`/api/runs/${id}/clips`)
       const json = await res.json()
       if (json.data) setClips(json.data)
+    } catch { /* silencieux */ }
+  }, [id])
+
+  const loadPrompts = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/runs/${id}/prompts`)
+      const json = await res.json()
+      if (json.data?.prompts) {
+        setPromptDrafts(
+          Object.fromEntries(
+            json.data.prompts.map((entry: { sceneIndex: number; prompt: string; negativePrompt?: string }) => [
+              entry.sceneIndex,
+              { prompt: entry.prompt, negativePrompt: entry.negativePrompt ?? '' },
+            ]),
+          ),
+        )
+      }
     } catch { /* silencieux */ }
   }, [id])
 
@@ -146,13 +168,25 @@ export default function PreviewPage() {
   useEffect(() => {
     void Promise.all([
       loadClips(),
+      loadPrompts(),
       loadStoryboard(),
       loadManifest(),
       loadFailoverLog(),
       loadPublishContext(),
       loadDirectorPlan(),
     ]).then(() => setLoading(false))
-  }, [loadClips, loadStoryboard, loadManifest, loadFailoverLog, loadPublishContext, loadDirectorPlan])
+  }, [loadClips, loadPrompts, loadStoryboard, loadManifest, loadFailoverLog, loadPublishContext, loadDirectorPlan])
+
+  async function savePrompt(sceneIndex: number) {
+    const draft = promptDrafts[sceneIndex]
+    if (!draft) return
+    await fetch(`/api/runs/${id}/prompts`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sceneIndex, prompt: draft.prompt, negativePrompt: draft.negativePrompt }),
+    })
+    await Promise.all([loadPrompts(), loadClips()])
+  }
 
   async function handleRegenerate(type: 'storyboard' | 'video', sceneIndex: number) {
     setRegenerating((prev) => ({ ...prev, [sceneIndex]: true }))
@@ -166,7 +200,16 @@ export default function PreviewPage() {
       const res = await fetch(`/api/runs/${id}/regenerate-scene`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, sceneIndex }),
+        body: JSON.stringify({
+          type,
+          sceneIndex,
+          ...(type === 'video' && promptDrafts[sceneIndex]
+            ? {
+                prompt: promptDrafts[sceneIndex].prompt,
+                negativePrompt: promptDrafts[sceneIndex].negativePrompt,
+              }
+            : {}),
+        }),
       })
       const json = await res.json()
 
@@ -179,7 +222,7 @@ export default function PreviewPage() {
             failover: json.data.failoverOccurred,
           },
         }))
-        await Promise.all([loadStoryboard(), loadFailoverLog()])
+        await Promise.all([loadStoryboard(), loadFailoverLog(), loadClips(), loadPrompts()])
       } else {
         setRegenResult((prev) => ({
           ...prev,
@@ -221,11 +264,24 @@ export default function PreviewPage() {
   if (loading) return <p className="text-sm text-muted-foreground">Chargement...</p>
 
   const completedClips = clips.filter(c => c.status === 'completed')
-  const generatedImages = storyboard.filter(i => i.status === 'generated')
+  const realStoryboardImages = storyboard.filter(i => i.status === 'generated' && !i.isPlaceholder)
+  const placeholderStoryboardImages = storyboard.filter(i => i.isPlaceholder)
   const hasPlayable = !!(manifest?.playableFilePath)
   const hasClips = completedClips.length > 0
-  const hasStoryboard = generatedImages.length > 0
+  const hasStoryboard = realStoryboardImages.length > 0
   const mode = manifest?.mode ?? 'none'
+  const promptSceneIndexes = Array.from(
+    new Set([
+      ...storyboard.map((img) => img.sceneIndex),
+      ...clips.map((clip) => clip.stepIndex),
+      ...Object.keys(promptDrafts).map((key) => Number(key)).filter((value) => Number.isFinite(value)),
+    ]),
+  ).sort((a, b) => a - b)
+  const promptScenes = promptSceneIndexes.map((sceneIndex) => ({
+    sceneIndex,
+    storyboardImage: storyboard.find((img) => img.sceneIndex === sceneIndex),
+    clip: clips.find((clip) => clip.stepIndex === sceneIndex),
+  }))
 
   const visibleFailovers = failoverLog.filter(
     (e) =>
@@ -341,11 +397,19 @@ export default function PreviewPage() {
         <div className="rounded-md border p-3 text-sm">
           {hasClips ? (
             <p className="text-amber-700">{completedClips.length} clip(s) présent(s) — assemblage non encore exécuté (step 7 non atteint).</p>
+          ) : placeholderStoryboardImages.length > 0 ? (
+            <p className="text-amber-700">Des placeholders locaux ont été produits à la place de vraies images storyboard. Ce storyboard est fake tant qu’une régénération réelle n’a pas réussi.</p>
           ) : hasStoryboard ? (
             <p className="text-amber-700">Storyboard disponible. Pas de clips vidéo (providers non configurés). Aucun animatic assemblé.</p>
           ) : (
             <p className="text-muted-foreground">Aucun artefact visuel disponible. Le pipeline doit atteindre au moins le step 4 (Storyboard).</p>
           )}
+        </div>
+      )}
+
+      {placeholderStoryboardImages.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+          {placeholderStoryboardImages.length} scène(s) storyboard sont en placeholder local. Elles ne doivent pas être prises pour de vraies images : régénère les scènes pour obtenir un storyboard réel.
         </div>
       )}
 
@@ -365,23 +429,29 @@ export default function PreviewPage() {
 
               return (
                 <div key={img.sceneIndex} className="rounded-lg border overflow-hidden">
-                  <div className="aspect-9/16 bg-muted relative">
+                  <div className="aspect-video bg-muted relative">
                     <span className="absolute top-2 left-2 rounded-full bg-background/80 px-2 py-0.5 text-xs font-mono z-10">
                       {img.sceneIndex}
                     </span>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`/api/runs/${id}/storyboard/image/${img.sceneIndex}`}
-                      alt={`Scène ${img.sceneIndex}`}
-                      className="w-full h-full object-cover"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                    />
+                    {img.isPlaceholder ? (
+                      <div className="flex h-full w-full items-center justify-center px-3 text-center text-xs text-amber-800">
+                        Placeholder local — pas une vraie image storyboard
+                      </div>
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/runs/${id}/storyboard/image/${img.sceneIndex}`}
+                        alt={`Scène ${img.sceneIndex}`}
+                        className="w-full h-full object-contain bg-white"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                      />
+                    )}
                   </div>
                   <div className="p-2 space-y-1.5">
                     <p className="text-xs text-muted-foreground line-clamp-2">{img.description}</p>
                     <div className="flex items-center gap-1 flex-wrap">
                       <Badge variant="secondary" className="text-[9px]">
-                        {img.status === 'generated' ? 'Généré' : img.status}
+                        {img.isPlaceholder ? 'Placeholder local' : img.status === 'generated' ? 'Généré' : img.status}
                       </Badge>
                       {regen && (
                         <Badge
@@ -411,34 +481,86 @@ export default function PreviewPage() {
         </div>
       )}
 
-      {/* Timeline clips si présents */}
-      {hasClips && (
+      {/* Prompts vidéo visibles même sans clip déjà généré */}
+      {promptScenes.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-medium">Clips vidéo — {completedClips.length}</h2>
+          <h2 className="text-sm font-medium">Prompts vidéo — {promptScenes.length} scène(s)</h2>
           <div className="flex gap-2 overflow-x-auto pb-2">
-            {clips.map((c) => (
-              <div key={c.id} className="shrink-0 w-28 rounded-lg border p-2 space-y-1">
+            {promptScenes.map(({ sceneIndex, storyboardImage, clip }) => (
+              <div key={clip?.id ?? `prompt-${sceneIndex}`} className="shrink-0 w-44 rounded-lg border p-2 space-y-2">
                 <div className="aspect-9/16 rounded bg-muted flex items-center justify-center">
-                  <span className="text-xs font-mono text-muted-foreground">{c.stepIndex}</span>
+                  <span className="text-xs font-mono text-muted-foreground">S{sceneIndex}</span>
                 </div>
                 <Badge
-                  variant={c.status === 'completed' ? 'default' : 'destructive'}
+                  variant={clip?.status === 'completed' ? 'default' : clip ? 'destructive' : 'secondary'}
                   className="text-[9px] w-full justify-center"
                 >
-                  {c.status === 'completed' ? 'OK' : 'Échec'}
+                  {clip?.status === 'completed'
+                    ? 'Clip généré'
+                    : clip?.status === 'failed'
+                    ? 'Clip en échec'
+                    : 'Clip non généré'}
                 </Badge>
-                {c.provider && c.provider !== 'video' && (
-                  <p className="text-[9px] text-muted-foreground text-center">{c.provider}</p>
+                {clip?.provider && clip.provider !== 'video' && (
+                  <p className="text-[9px] text-muted-foreground text-center">{clip.provider}</p>
                 )}
-                <p className="text-[10px] text-muted-foreground line-clamp-2">{c.prompt}</p>
+                <p className="text-[10px] text-muted-foreground line-clamp-3">
+                  {storyboardImage?.description ?? 'Aucune description storyboard disponible pour cette scène.'}
+                </p>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-medium text-foreground">Prompt vidéo</p>
+                  <textarea
+                    value={promptDrafts[sceneIndex]?.prompt ?? clip?.prompt ?? ''}
+                    onChange={(e) => setPromptDrafts((prev) => ({
+                      ...prev,
+                      [sceneIndex]: {
+                        prompt: e.target.value,
+                        negativePrompt: prev[sceneIndex]?.negativePrompt ?? clip?.negativePrompt ?? '',
+                      },
+                    }))}
+                    className="min-h-20 w-full rounded-md border bg-background px-1.5 py-1 text-[10px]"
+                  />
+                  <p className="text-[10px] font-medium text-foreground">Negative prompt</p>
+                  <textarea
+                    value={promptDrafts[sceneIndex]?.negativePrompt ?? clip?.negativePrompt ?? ''}
+                    onChange={(e) => setPromptDrafts((prev) => ({
+                      ...prev,
+                      [sceneIndex]: {
+                        prompt: prev[sceneIndex]?.prompt ?? clip?.prompt ?? '',
+                        negativePrompt: e.target.value,
+                      },
+                    }))}
+                    placeholder="Negative prompt"
+                    className="min-h-14 w-full rounded-md border bg-background px-1.5 py-1 text-[10px] text-muted-foreground"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-[10px] h-6"
+                    onClick={() => savePrompt(sceneIndex)}
+                    disabled={!(promptDrafts[sceneIndex]?.prompt ?? clip?.prompt ?? '').trim()}
+                  >
+                    Sauver prompt
+                  </Button>
+                </div>
+                {regenResult[sceneIndex] && (
+                  <Badge
+                    variant={regenResult[sceneIndex].ok ? 'default' : 'destructive'}
+                    className="text-[9px] w-full justify-center"
+                  >
+                    {regenResult[sceneIndex].ok
+                      ? `✓ ${regenResult[sceneIndex].provider}${regenResult[sceneIndex].failover ? ' (basculé)' : ''}`
+                      : `✗ ${regenResult[sceneIndex].error ?? 'Échec'}`}
+                  </Badge>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
                   className="w-full text-[10px] h-6"
-                  onClick={() => handleRegenerate('video', c.stepIndex)}
-                  disabled={regenerating[c.stepIndex] ?? false}
+                  onClick={() => handleRegenerate('video', sceneIndex)}
+                  disabled={regenerating[sceneIndex] ?? false}
                 >
-                  {regenerating[c.stepIndex] ? '...' : 'Régénérer'}
+                  {regenerating[sceneIndex] ? '...' : 'Régénérer'}
                 </Button>
               </div>
             ))}
