@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { PublishPanel } from '@/components/publish/publish-panel'
+import type { PublishContext } from '@/components/publish/publish-panel'
 
 type Clip = {
   id: string
@@ -58,22 +60,6 @@ type DirectorPlan = {
   }[]
 }
 
-type PublishStatus = 'SUCCESS' | 'PROCESSING' | 'FAILED' | 'NO_CREDENTIALS' | 'NO_MEDIA' | 'not_published'
-
-type PublishResult = {
-  status: PublishStatus
-  publishId?: string
-  videoId?: string
-  shareUrl?: string
-  profileUrl?: string
-  error?: string
-  credentials?: { hasAccessToken: boolean; hasClientKey: boolean }
-  publishedAt?: string
-  mediaMode?: string
-  mediaSizeBytes?: number
-  tiktokHealth?: { status: string; details: string }
-}
-
 const MODE_LABELS: Record<string, string> = {
   video_finale: 'Vidéo finale',
   animatic: 'Animatic',
@@ -94,7 +80,7 @@ export default function PreviewPage() {
   const [storyboard, setStoryboard] = useState<StoryboardImage[]>([])
   const [manifest, setManifest] = useState<PreviewManifest | null>(null)
   const [failoverLog, setFailoverLog] = useState<FailoverEntry[]>([])
-  const [publishResult, setPublishResult] = useState<PublishResult | null>(null)
+  const [publishContext, setPublishContext] = useState<PublishContext | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [directorPlan, setDirectorPlan] = useState<DirectorPlan | null>(null)
@@ -137,12 +123,12 @@ export default function PreviewPage() {
     } catch { /* silencieux */ }
   }, [id])
 
-  const loadPublishStatus = useCallback(async () => {
+  const loadPublishContext = useCallback(async () => {
     try {
-      const res = await fetch(`/api/runs/${id}/publish`)
+      const res = await fetch(`/api/runs/${id}/publication-context`)
       if (res.ok) {
         const json = await res.json()
-        if (json.data) setPublishResult(json.data)
+        if (json.data) setPublishContext(json.data)
       }
     } catch { /* silencieux */ }
   }, [id])
@@ -158,21 +144,15 @@ export default function PreviewPage() {
   }, [id])
 
   useEffect(() => {
-    void Promise.all([loadClips(), loadStoryboard(), loadManifest(), loadFailoverLog(), loadPublishStatus(), loadDirectorPlan()])
-      .then(() => setLoading(false))
-  }, [loadClips, loadStoryboard, loadManifest, loadFailoverLog, loadPublishStatus, loadDirectorPlan])
-
-  // Polling automatique si PROCESSING — arrêt sur état terminal, timeout 5min
-  useEffect(() => {
-    if (publishResult?.status !== 'PROCESSING') return
-    let elapsed = 0
-    const interval = setInterval(async () => {
-      elapsed += 5
-      await loadPublishStatus()
-      if (elapsed >= 300) clearInterval(interval)
-    }, 5000)
-    return () => clearInterval(interval)
-  }, [publishResult?.status, loadPublishStatus])
+    void Promise.all([
+      loadClips(),
+      loadStoryboard(),
+      loadManifest(),
+      loadFailoverLog(),
+      loadPublishContext(),
+      loadDirectorPlan(),
+    ]).then(() => setLoading(false))
+  }, [loadClips, loadStoryboard, loadManifest, loadFailoverLog, loadPublishContext, loadDirectorPlan])
 
   async function handleRegenerate(type: 'storyboard' | 'video', sceneIndex: number) {
     setRegenerating((prev) => ({ ...prev, [sceneIndex]: true }))
@@ -199,7 +179,6 @@ export default function PreviewPage() {
             failover: json.data.failoverOccurred,
           },
         }))
-        // Recharger storyboard + failover-log après régénération réussie
         await Promise.all([loadStoryboard(), loadFailoverLog()])
       } else {
         setRegenResult((prev) => ({
@@ -223,19 +202,18 @@ export default function PreviewPage() {
     }
   }
 
-  async function handlePublishTikTok() {
+  async function handlePublish(platform: string) {
     setPublishing(true)
     try {
-      const res = await fetch(`/api/runs/${id}/publish`, {
+      await fetch(`/api/runs/${id}/publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'tiktok' }),
+        body: JSON.stringify({ platform }),
       })
-      const json = await res.json()
-      if (json.data) setPublishResult(json.data)
-    } catch {
-      setPublishResult({ status: 'FAILED', error: 'Erreur réseau' })
-    } finally {
+      // Recharger le contexte pour mettre à jour le manifest
+      await loadPublishContext()
+    } catch { /* silencieux */ }
+    finally {
       setPublishing(false)
     }
   }
@@ -248,11 +226,7 @@ export default function PreviewPage() {
   const hasClips = completedClips.length > 0
   const hasStoryboard = generatedImages.length > 0
   const mode = manifest?.mode ?? 'none'
-  const publishStatus = publishResult?.status ?? 'not_published'
 
-  // Failovers visibles :
-  // - RegenerationAttempt avec failover ou en échec
-  // - FailoverEvent brut (persisté par executeWithFailover, pas de champ "success")
   const visibleFailovers = failoverLog.filter(
     (e) =>
       (e.failoverOccurred ?? false) ||
@@ -292,7 +266,7 @@ export default function PreviewPage() {
         </div>
       )}
 
-      {/* Direction créative — 10C */}
+      {/* Direction créative */}
       {directorPlan && (
         <div className="rounded-md border border-violet-200 bg-violet-50/50 p-3 space-y-2">
           <div className="flex items-center gap-2">
@@ -339,57 +313,19 @@ export default function PreviewPage() {
             src={`/api/runs/${id}/media`}
             preload="metadata"
           />
+        </div>
+      )}
 
-          <div className="rounded-md border p-3 space-y-2 text-xs">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium">TikTok</span>
-              <Badge variant={publishStatus === 'SUCCESS' ? 'default' : publishStatus === 'PROCESSING' ? 'secondary' : publishStatus === 'not_published' ? 'outline' : 'destructive'}>
-                {publishStatus === 'SUCCESS'
-                  ? 'Publié'
-                  : publishStatus === 'PROCESSING'
-                  ? 'En cours'
-                  : publishStatus === 'NO_CREDENTIALS'
-                  ? 'Credentials manquants'
-                  : publishStatus === 'NO_MEDIA'
-                  ? 'Pas de média'
-                  : publishStatus === 'FAILED'
-                  ? 'Échec'
-                  : 'Non publié'}
-              </Badge>
-              <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={handlePublishTikTok} disabled={publishing}>
-                {publishing ? 'Publication...' : publishStatus === 'SUCCESS' ? 'Re-publier' : 'Publier sur TikTok'}
-              </Button>
-              <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => void loadPublishStatus()}>
-                Rafraîchir
-              </Button>
-            </div>
-
-            <div className="grid gap-1 text-muted-foreground">
-              <p>Mode : <span className="text-foreground">{MODE_LABELS[mode] ?? mode}</span></p>
-              {publishResult?.publishId && <p>Publish ID : <code className="text-[10px]">{publishResult.publishId}</code></p>}
-              {publishResult?.videoId && <p>Video ID : <code className="text-[10px]">{publishResult.videoId}</code></p>}
-              {publishResult?.mediaSizeBytes && <p>Taille vidéo : <span className="text-foreground">{(publishResult.mediaSizeBytes / (1024 * 1024)).toFixed(2)} MB</span></p>}
-              {publishResult?.publishedAt && <p>Publié le : <span className="text-foreground">{new Date(publishResult.publishedAt).toLocaleString()}</span></p>}
-              {publishResult?.shareUrl && (
-                <p>
-                  Lien vidéo :{' '}
-                  <a href={publishResult.shareUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 text-foreground">
-                    ouvrir
-                  </a>
-                </p>
-              )}
-              {!publishResult?.shareUrl && publishResult?.profileUrl && (
-                <p>
-                  Profil TikTok :{' '}
-                  <a href={publishResult.profileUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 text-foreground">
-                    ouvrir le profil
-                  </a>
-                </p>
-              )}
-              {publishResult?.error && <p className="text-destructive">Erreur : {publishResult.error}</p>}
-              {publishResult?.tiktokHealth?.details && publishStatus === 'not_published' && <p>{publishResult.tiktokHealth.details}</p>}
-            </div>
-          </div>
+      {/* Panneau diffusion contextualisé — 13C */}
+      {publishContext && (
+        <div className="rounded-md border p-3">
+          <PublishPanel
+            runId={id}
+            context={publishContext}
+            hasPlayable={hasPlayable}
+            onPublish={handlePublish}
+            publishing={publishing}
+          />
         </div>
       )}
 

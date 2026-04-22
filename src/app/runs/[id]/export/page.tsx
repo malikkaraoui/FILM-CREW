@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { PublishPanel } from '@/components/publish/publish-panel'
+import type { PublishContext } from '@/components/publish/publish-panel'
 
 type Metadata = {
   description?: string
@@ -22,23 +24,6 @@ type PreviewManifest = {
   mediaFile: string | null
 }
 
-type PublishStatus = 'SUCCESS' | 'PROCESSING' | 'FAILED' | 'NO_CREDENTIALS' | 'NO_MEDIA' | 'not_published'
-
-type PublishResult = {
-  status: PublishStatus
-  publishId?: string
-  videoId?: string
-  shareUrl?: string
-  profileUrl?: string
-  error?: string
-  credentials?: { hasAccessToken: boolean; hasClientKey: boolean }
-  instructions?: string
-  publishedAt?: string
-  title?: string
-  mediaMode?: string
-  tiktokHealth?: { status: string; details: string }
-}
-
 const MODE_LABELS: Record<string, string> = {
   video_finale: 'Vidéo finale',
   animatic: 'Animatic',
@@ -46,29 +31,11 @@ const MODE_LABELS: Record<string, string> = {
   none: 'Aucun média',
 }
 
-const PUBLISH_STATUS_LABELS: Record<PublishStatus, string> = {
-  SUCCESS: 'Publié',
-  PROCESSING: 'En cours',
-  FAILED: 'Échec',
-  NO_CREDENTIALS: 'Credentials manquants',
-  NO_MEDIA: 'Pas de média',
-  not_published: 'Non publié',
-}
-
-const PUBLISH_STATUS_VARIANTS: Record<PublishStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
-  SUCCESS: 'default',
-  PROCESSING: 'secondary',
-  FAILED: 'destructive',
-  NO_CREDENTIALS: 'outline',
-  NO_MEDIA: 'destructive',
-  not_published: 'outline',
-}
-
 export default function ExportPage() {
   const { id } = useParams<{ id: string }>()
   const [metadata, setMetadata] = useState<Metadata | null>(null)
   const [manifest, setManifest] = useState<PreviewManifest | null>(null)
-  const [publishResult, setPublishResult] = useState<PublishResult | null>(null)
+  const [publishContext, setPublishContext] = useState<PublishContext | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([])
@@ -91,31 +58,19 @@ export default function ExportPage() {
     } catch { /* silencieux */ }
   }, [id])
 
-  const loadPublishStatus = useCallback(async () => {
+  const loadPublishContext = useCallback(async () => {
     try {
-      const res = await fetch(`/api/runs/${id}/publish`)
+      const res = await fetch(`/api/runs/${id}/publication-context`)
       if (res.ok) {
         const json = await res.json()
-        if (json.data) setPublishResult(json.data)
+        if (json.data) setPublishContext(json.data)
       }
     } catch { /* silencieux */ }
   }, [id])
 
   useEffect(() => {
-    void Promise.all([loadExportData(), loadManifest(), loadPublishStatus()])
-  }, [loadExportData, loadManifest, loadPublishStatus])
-
-  // Polling automatique si PROCESSING — arrêt sur état terminal, timeout 5min
-  useEffect(() => {
-    if (publishResult?.status !== 'PROCESSING') return
-    let elapsed = 0
-    const interval = setInterval(async () => {
-      elapsed += 5
-      await loadPublishStatus()
-      if (elapsed >= 300) clearInterval(interval)
-    }, 5000)
-    return () => clearInterval(interval)
-  }, [publishResult?.status, loadPublishStatus])
+    void Promise.all([loadExportData(), loadManifest(), loadPublishContext()])
+  }, [loadExportData, loadManifest, loadPublishContext])
 
   async function handleRegenerate() {
     setRegenerating(true)
@@ -144,26 +99,24 @@ export default function ExportPage() {
     setLoadingArtifacts(false)
   }
 
-  async function handlePublishTikTok() {
+  async function handlePublish(platform: string) {
     setPublishing(true)
     try {
-      const res = await fetch(`/api/runs/${id}/publish`, {
+      await fetch(`/api/runs/${id}/publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'tiktok' }),
+        body: JSON.stringify({ platform }),
       })
-      const json = await res.json()
-      if (json.data) setPublishResult(json.data)
-    } catch {
-      setPublishResult({ status: 'FAILED', error: 'Erreur réseau' })
-    } finally {
+      // Recharger le contexte pour mettre à jour le manifest
+      await loadPublishContext()
+    } catch { /* silencieux */ }
+    finally {
       setPublishing(false)
     }
   }
 
   const hasPlayable = !!(manifest?.playableFilePath)
   const mode = manifest?.mode ?? 'none'
-  const publishStatus = publishResult?.status ?? 'not_published'
 
   return (
     <div className="max-w-lg space-y-6">
@@ -192,137 +145,20 @@ export default function ExportPage() {
         </div>
       )}
 
-      {/* Publication TikTok */}
-      <Card>
-        <CardHeader className="py-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm">Publication TikTok</CardTitle>
-              <Badge variant={PUBLISH_STATUS_VARIANTS[publishStatus]}>
-                {PUBLISH_STATUS_LABELS[publishStatus]}
-              </Badge>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              onClick={handlePublishTikTok}
-              disabled={publishing}
-            >
-              {publishing ? 'Publication...' : publishStatus === 'SUCCESS' ? 'Re-publier' : 'Publier sur TikTok'}
-            </Button>
-          </div>
-
-          {/* Résultat de publication */}
-          {publishResult && publishResult.status !== 'not_published' && (
-            <div className="space-y-1.5">
-              {publishResult.status === 'SUCCESS' && (
-                <div className="rounded-md border border-green-200 bg-green-50 p-2 text-xs text-green-800">
-                  <p className="font-medium">✓ Publié sur TikTok</p>
-                  {publishResult.publishId && (
-                    <p>Publish ID : <code className="text-[10px]">{publishResult.publishId}</code></p>
-                  )}
-                  {publishResult.videoId && (
-                    <p>Video ID : <code className="text-[10px]">{publishResult.videoId}</code></p>
-                  )}
-                  {publishResult.shareUrl && (
-                    <p>
-                      Lien vidéo :{' '}
-                      <a href={publishResult.shareUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-                        ouvrir
-                      </a>
-                    </p>
-                  )}
-                  {!publishResult.shareUrl && publishResult.profileUrl && (
-                    <p>
-                      Profil TikTok :{' '}
-                      <a href={publishResult.profileUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-                        ouvrir le profil
-                      </a>
-                    </p>
-                  )}
-                  {publishResult.publishedAt && (
-                    <p className="text-[10px] text-green-600">{new Date(publishResult.publishedAt).toLocaleString()}</p>
-                  )}
-                </div>
-              )}
-
-              {publishResult.status === 'PROCESSING' && (
-                <div className="rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
-                  <p className="font-medium">Publication en cours de traitement</p>
-                  {publishResult.publishId && (
-                    <p>Publish ID : <code className="text-[10px]">{publishResult.publishId}</code></p>
-                  )}
-                  {publishResult.profileUrl && (
-                    <p>
-                      Profil TikTok :{' '}
-                      <a href={publishResult.profileUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-                        ouvrir le profil
-                      </a>
-                    </p>
-                  )}
-                  <p className="text-[10px]">Vérifiable manuellement sur https://developers.tiktok.com</p>
-                </div>
-              )}
-
-              {publishResult.status === 'NO_CREDENTIALS' && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 space-y-1">
-                  <p className="font-medium">Credentials TikTok absents</p>
-                  <div className="flex gap-2">
-                    <span>TIKTOK_ACCESS_TOKEN :</span>
-                    <Badge variant={publishResult.credentials?.hasAccessToken ? 'default' : 'destructive'} className="text-[9px]">
-                      {publishResult.credentials?.hasAccessToken ? 'présent' : 'absent'}
-                    </Badge>
-                  </div>
-                  {publishResult.instructions && (
-                    <pre className="text-[9px] whitespace-pre-wrap text-amber-700 mt-1 font-mono leading-relaxed">
-                      {publishResult.instructions}
-                    </pre>
-                  )}
-                  <p className="pt-1 text-[10px] text-amber-700">
-                    Si l’app est déployée en HTTPS, lance l’assistant OAuth via{' '}
-                    <a
-                      href="/tiktok/connect"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline underline-offset-2"
-                    >
-                      /tiktok/connect
-                    </a>
-                    .
-                  </p>
-                </div>
-              )}
-
-              {(publishResult.status === 'FAILED' || publishResult.status === 'NO_MEDIA') && (
-                <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-                  <p className="font-medium">
-                    {publishResult.status === 'NO_MEDIA' ? 'Pas de fichier vidéo disponible' : 'Échec de publication'}
-                  </p>
-                  {publishResult.error && <p className="text-[10px] mt-0.5">{publishResult.error}</p>}
-                </div>
-              )}
-
-              {/* publish-result.json persisté */}
-              <p className="text-[9px] text-muted-foreground">
-                Résultat persisté dans{' '}
-                <code>storage/runs/{id}/final/publish-result.json</code>
-              </p>
-            </div>
-          )}
-
-          {/* Healthcheck si non publié */}
-          {(!publishResult || publishResult.status === 'not_published') && (
-            <CardDescription>
-              {publishResult?.tiktokHealth?.status === 'ready'
-                ? 'Credentials TikTok valides. Cliquez sur Publier pour lancer la publication.'
-                : publishResult?.tiktokHealth?.status === 'no_credentials'
-                ? 'TIKTOK_ACCESS_TOKEN absent — définir dans .env.local, ou ouvrir /tiktok/connect sur l’instance HTTPS déployée.'
-                : 'Cliquez sur Publier pour tenter la publication TikTok.'}
-            </CardDescription>
-          )}
-        </CardHeader>
-      </Card>
+      {/* Panneau diffusion contextualisé — 13C */}
+      {publishContext && (
+        <Card>
+          <CardHeader className="py-3">
+            <PublishPanel
+              runId={id}
+              context={publishContext}
+              hasPlayable={hasPlayable}
+              onPublish={handlePublish}
+              publishing={publishing}
+            />
+          </CardHeader>
+        </Card>
+      )}
 
       {/* Métadonnées */}
       <Card>
