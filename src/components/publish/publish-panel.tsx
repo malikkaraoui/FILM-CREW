@@ -56,7 +56,7 @@ export type PublicationAccount = {
 }
 
 export type PublishContext = {
-  chainId: string
+  chainId: string | null
   chainName: string | null
   accounts: PublicationAccount[]
   manifest: PublishManifest | null
@@ -96,12 +96,17 @@ export function PublishPanel({ runId, context, hasPlayable, onPublish, publishin
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium">
           Diffusion
-          {chainName && (
+          {chainName && chainId && (
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               via{' '}
               <Link href={`/chains/${chainId}`} className="hover:underline">
                 {chainName}
               </Link>
+            </span>
+          )}
+          {!chainName && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              sans chaîne liée
             </span>
           )}
         </p>
@@ -110,11 +115,15 @@ export function PublishPanel({ runId, context, hasPlayable, onPublish, publishin
       {activeAccounts.length === 0 ? (
         <div className="rounded-md border border-amber-200 bg-amber-50/50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/20">
           <p className="text-amber-700 dark:text-amber-300">
-            Aucun compte de publication lié à cette chaîne.
+            {chainId
+              ? 'Aucun compte de publication lié à cette chaîne.'
+              : 'Aucune chaîne liée à ce run viral. La diffusion restera indisponible tant qu’aucune chaîne n’est associée.'}
           </p>
-          <Link href={`/chains/${chainId}`} className="mt-1 inline-block text-xs text-amber-600 underline underline-offset-2 hover:text-amber-800 dark:text-amber-400">
-            Configurer la diffusion →
-          </Link>
+          {chainId && (
+            <Link href={`/chains/${chainId}`} className="mt-1 inline-block text-xs text-amber-600 underline underline-offset-2 hover:text-amber-800 dark:text-amber-400">
+              Configurer la diffusion →
+            </Link>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-2">

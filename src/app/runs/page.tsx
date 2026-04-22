@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import type { Run } from '@/types/run'
 import type { Chain } from '@/types/chain'
+import { formatPipelineStepLabel } from '@/lib/pipeline/constants'
 
 const STATUS_LABELS: Record<string, string> = {
   pending: 'En attente',
@@ -71,15 +72,15 @@ export default function RunsPage() {
                   </Link>
                 </td>
                 <td className="py-2 text-muted-foreground">
-                  {chainMap[r.chainId]
+                  {r.chainId && chainMap[r.chainId]
                     ? <Link href={`/chains/${r.chainId}`} className="hover:underline">{chainMap[r.chainId].name}</Link>
-                    : <span className="text-xs">{r.chainId.slice(0, 8)}…</span>
+                    : <span className="text-xs">{r.chainId ? `${r.chainId.slice(0, 8)}…` : 'Sans chaîne'}</span>
                   }
                 </td>
                 <td className="py-2">
                   <span className={`font-medium ${STATUS_CLASSES[r.status] ?? ''}`}>
                     {r.status === 'running' && r.currentStep
-                      ? `Étape ${r.currentStep}/8`
+                      ? formatPipelineStepLabel(r.currentStep)
                       : (STATUS_LABELS[r.status] ?? r.status)}
                   </span>
                 </td>

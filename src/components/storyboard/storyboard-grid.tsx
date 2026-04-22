@@ -13,6 +13,10 @@ type StoryboardImage = {
   providerUsed?: string | null
   failoverOccurred?: boolean
   isPlaceholder?: boolean
+  cloudPlanStatus?: 'queued' | 'ready' | 'failed' | null
+  cloudPlanModel?: string | null
+  cloudPlanMode?: string | null
+  cloudPlanAppliedAt?: string | null
 }
 
 type Props = {
@@ -20,6 +24,7 @@ type Props = {
   images: StoryboardImage[]
   boardFilePath?: string | null
   boardLayout?: string | null
+  assetVersion?: string
   onValidate: (sceneIndex: number) => void
   onReject: (sceneIndex: number) => void
   onValidateAll: () => void
@@ -35,7 +40,13 @@ const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'second
   rejected: { label: 'À refaire', variant: 'destructive' },
 }
 
-export function StoryboardGrid({ runId, images, boardFilePath, boardLayout, onValidate, onReject, onValidateAll, onEditDescription, onEditPrompt, onRegenerate }: Props) {
+const CLOUD_PLAN_BADGE: Record<'queued' | 'ready' | 'failed', { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+  queued: { label: 'Cloud en cours', variant: 'outline' },
+  ready: { label: 'Plan cloud prêt', variant: 'secondary' },
+  failed: { label: 'Cloud échoué', variant: 'destructive' },
+}
+
+export function StoryboardGrid({ runId, images, boardFilePath, boardLayout, assetVersion, onValidate, onReject, onValidateAll, onEditDescription, onEditPrompt, onRegenerate }: Props) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
   const [promptDrafts, setPromptDrafts] = useState<Record<number, string>>({})
@@ -95,7 +106,7 @@ export function StoryboardGrid({ runId, images, boardFilePath, boardLayout, onVa
           <div className="overflow-hidden rounded-md border bg-white">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={`/api/runs/${runId}/storyboard/board`}
+              src={`/api/runs/${runId}/storyboard/board?v=${encodeURIComponent(assetVersion || '0')}`}
               alt="Planche storyboard"
               className="h-auto w-full object-contain"
             />
@@ -114,7 +125,6 @@ export function StoryboardGrid({ runId, images, boardFilePath, boardLayout, onVa
               key={img.sceneIndex}
               className="rounded-lg border overflow-hidden"
             >
-              {/* Vignette — placeholder ou image */}
               <div className="aspect-video bg-muted flex items-center justify-center relative">
                 <span className="absolute top-2 left-2 rounded-full bg-background/80 px-2 py-0.5 text-xs font-mono">
                   {img.sceneIndex}
@@ -131,21 +141,39 @@ export function StoryboardGrid({ runId, images, boardFilePath, boardLayout, onVa
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={`/api/runs/${runId}/storyboard/image/${img.sceneIndex}`}
+                    src={`/api/runs/${runId}/storyboard/image/${img.sceneIndex}?v=${encodeURIComponent(`${assetVersion || '0'}-${img.cloudPlanAppliedAt || img.filePath}`)}`}
                     alt={`Scène ${img.sceneIndex}`}
                     className="w-full h-full object-contain bg-white"
                   />
                 )}
               </div>
 
-              {/* Description */}
               <div className="p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <Badge variant={badge.variant}>{badge.label}</Badge>
-                  {isPlaceholder && (
-                    <Badge variant="destructive">fake / placeholder</Badge>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={badge.variant}>{badge.label}</Badge>
+                    {img.cloudPlanStatus && CLOUD_PLAN_BADGE[img.cloudPlanStatus] && (
+                      <Badge variant={CLOUD_PLAN_BADGE[img.cloudPlanStatus].variant}>
+                        {CLOUD_PLAN_BADGE[img.cloudPlanStatus].label}
+                      </Badge>
+                    )}
+                    {isPlaceholder && (
+                      <Badge variant="destructive">fake / placeholder</Badge>
+                    )}
+                  </div>
                 </div>
+
+                {img.cloudPlanStatus && img.cloudPlanModel && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {img.cloudPlanStatus === 'queued'
+                      ? `Ollama ${img.cloudPlanModel} tourne en arrière-plan (${img.cloudPlanMode || 'cloud'}).`
+                      : img.cloudPlanStatus === 'ready'
+                        ? img.cloudPlanAppliedAt
+                          ? `Plan cloud appliqué au rough via ${img.cloudPlanModel} (${img.cloudPlanMode || 'cloud'}).`
+                          : `Plan de dessin JSON prêt via ${img.cloudPlanModel} (${img.cloudPlanMode || 'cloud'}).`
+                        : `Le passage cloud ${img.cloudPlanModel} a échoué.`}
+                  </p>
+                )}
 
                 {isPlaceholder && (
                   <p className="text-[10px] text-amber-700">

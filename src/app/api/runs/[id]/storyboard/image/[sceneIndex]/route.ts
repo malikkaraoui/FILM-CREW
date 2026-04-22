@@ -10,8 +10,9 @@ export async function GET(
     const manifestPath = join(process.cwd(), 'storage', 'runs', id, 'storyboard', 'manifest.json')
     const manifest = JSON.parse(await readFile(manifestPath, 'utf-8'))
     const image = manifest.images?.find((i: { sceneIndex: number }) => i.sceneIndex === parseInt(sceneIndex))
+    const isPlaceholder = image?.isPlaceholder || image?.filePath?.includes('placeholder-') || image?.filePath?.endsWith('.txt')
 
-    if (!image || image.status !== 'generated') {
+    if (!image || image.status !== 'generated' || isPlaceholder) {
       return new Response('Image non disponible', { status: 404 })
     }
 
@@ -20,7 +21,7 @@ export async function GET(
     const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png'
 
     return new Response(buffer, {
-      headers: { 'Content-Type': mime, 'Cache-Control': 'public, max-age=3600' },
+      headers: { 'Content-Type': mime, 'Cache-Control': 'no-store' },
     })
   } catch {
     return new Response('Image introuvable', { status: 404 })

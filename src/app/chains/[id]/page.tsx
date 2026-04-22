@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { BrandKitForm } from '@/components/brand-kit/brand-kit-form'
 import type { Chain } from '@/types/chain'
 import type { Run } from '@/types/run'
+import { formatPipelineStepLabel } from '@/lib/pipeline/constants'
 
 type PublicationAccount = {
   id: string
@@ -183,7 +184,7 @@ export default function ChainDetailPage() {
                 <div className="ml-3 flex shrink-0 items-center gap-3">
                   <span className={`text-xs font-medium ${STATUS_CLASSES[r.status] ?? ''}`}>
                     {r.status === 'running' && r.currentStep
-                      ? `Étape ${r.currentStep}/8`
+                      ? formatPipelineStepLabel(r.currentStep)
                       : (STATUS_LABELS[r.status] ?? r.status)}
                   </span>
                   <span className="font-mono text-xs text-muted-foreground">{(r.costEur ?? 0).toFixed(2)} €</span>

@@ -14,6 +14,33 @@ export type LocalStoryboardSceneInput = {
 	dialogue?: string
 }
 
+export type StoryboardCloudPlanLike = {
+	panelTitle?: string
+	childCaption?: string
+	primarySubject?: string
+	action?: string
+	background?: string
+	framing?: string
+	lighting?: string
+	simpleShapes?: string[]
+	importantObjects?: string[]
+	drawingSteps?: string[]
+	kidNotes?: string[]
+}
+
+type ParsedStoryboardSceneSpec = Required<LocalStoryboardSceneInput> & {
+	planTitle: string
+	childCaption: string
+	primarySubject: string
+	action: string
+	background: string
+	framing: string
+	simpleShapes: string[]
+	importantObjects: string[]
+	drawingSteps: string[]
+	kidNotes: string[]
+}
+
 export type StoryboardManifestImage = {
 	sceneIndex: number
 	description: string
@@ -29,6 +56,19 @@ export type StoryboardBoardResult = {
 }
 
 const FALLBACK_FONT = 'Arial'
+const CLOUD_PLAN_PREFIXES = [
+	'plan-title:',
+	'plan-caption:',
+	'plan-subject:',
+	'plan-action:',
+	'plan-background:',
+	'plan-framing:',
+	'plan-lighting:',
+	'plan-shapes:',
+	'plan-objects:',
+	'plan-steps:',
+	'plan-notes:',
+]
 
 export const storyboardLocalProvider: ImageProvider = {
 	name: 'storyboard-local',
@@ -87,6 +127,32 @@ export function buildLocalStoryboardPrompt(scene: LocalStoryboardSceneInput): st
 	].join('\n')
 }
 
+export function mergeStoryboardPromptWithCloudPlan(
+	prompt: string,
+	plan: StoryboardCloudPlanLike,
+): string {
+	const baseLines = prompt
+		.split(/\r?\n/)
+		.map((line) => line.trimEnd())
+		.filter((line) => !CLOUD_PLAN_PREFIXES.some((prefix) => line.toLowerCase().startsWith(prefix)))
+
+	const cloudLines = [
+		plan.panelTitle ? `Plan-Title: ${toAscii(plan.panelTitle)}` : null,
+		plan.childCaption ? `Plan-Caption: ${toAscii(plan.childCaption)}` : null,
+		plan.primarySubject ? `Plan-Subject: ${toAscii(plan.primarySubject)}` : null,
+		plan.action ? `Plan-Action: ${toAscii(plan.action)}` : null,
+		plan.background ? `Plan-Background: ${toAscii(plan.background)}` : null,
+		plan.framing ? `Plan-Framing: ${toAscii(plan.framing)}` : null,
+		plan.lighting ? `Plan-Lighting: ${toAscii(plan.lighting)}` : null,
+		plan.simpleShapes && plan.simpleShapes.length > 0 ? `Plan-Shapes: ${plan.simpleShapes.map(toAscii).filter(Boolean).join(' | ')}` : null,
+		plan.importantObjects && plan.importantObjects.length > 0 ? `Plan-Objects: ${plan.importantObjects.map(toAscii).filter(Boolean).join(' | ')}` : null,
+		plan.drawingSteps && plan.drawingSteps.length > 0 ? `Plan-Steps: ${plan.drawingSteps.map(toAscii).filter(Boolean).join(' | ')}` : null,
+		plan.kidNotes && plan.kidNotes.length > 0 ? `Plan-Notes: ${plan.kidNotes.map(toAscii).filter(Boolean).join(' | ')}` : null,
+	].filter(Boolean)
+
+	return [...baseLines, ...cloudLines].join('\n')
+}
+
 export async function composeStoryboardBoard(
 	images: StoryboardManifestImage[],
 	outputDir: string,
@@ -135,7 +201,7 @@ export async function composeStoryboardBoard(
 	return { filePath: boardPath, columns, rows }
 }
 
-export function parseLocalStoryboardPrompt(prompt: string): Required<LocalStoryboardSceneInput> {
+export function parseLocalStoryboardPrompt(prompt: string): ParsedStoryboardSceneSpec {
 	const raw = prompt.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
 	const sceneIndex = readPrefixedValue(raw, 'Scene')
 	const description = readPrefixedValue(raw, 'Description') || firstSentence(prompt) || 'Scene description unavailable'
@@ -144,14 +210,30 @@ export function parseLocalStoryboardPrompt(prompt: string): Required<LocalStoryb
 	const durationRaw = readPrefixedValue(raw, 'Duration')
 	const durationS = Number.parseInt((durationRaw || '5').replace(/[^0-9]/g, ''), 10) || 5
 	const dialogue = readPrefixedValue(raw, 'Dialogue') || ''
+	const childCaption = readPrefixedValue(raw, 'Plan-Caption') || ''
+	const primarySubject = readPrefixedValue(raw, 'Plan-Subject') || ''
+	const action = readPrefixedValue(raw, 'Plan-Action') || ''
+	const background = readPrefixedValue(raw, 'Plan-Background') || ''
+	const framing = readPrefixedValue(raw, 'Plan-Framing') || ''
+	const planLighting = readPrefixedValue(raw, 'Plan-Lighting') || ''
 
 	return {
 		sceneIndex: sceneIndex ? Number.parseInt(sceneIndex.replace(/[^0-9]/g, ''), 10) || 0 : 0,
 		description: toAscii(description) || 'Scene description unavailable',
-		lighting: toAscii(lighting) || 'Natural light',
+		lighting: toAscii(planLighting || lighting) || 'Natural light',
 		camera: toAscii(camera) || 'Static camera',
 		durationS,
 		dialogue: toAscii(dialogue),
+		planTitle: toAscii(readPrefixedValue(raw, 'Plan-Title') || ''),
+		childCaption: toAscii(childCaption),
+		primarySubject: toAscii(primarySubject),
+		action: toAscii(action),
+		background: toAscii(background),
+		framing: toAscii(framing),
+		simpleShapes: readPrefixedList(raw, 'Plan-Shapes'),
+		importantObjects: readPrefixedList(raw, 'Plan-Objects'),
+		drawingSteps: readPrefixedList(raw, 'Plan-Steps'),
+		kidNotes: readPrefixedList(raw, 'Plan-Notes'),
 	}
 }
 
@@ -173,15 +255,15 @@ async function readImageAsDataUri(filePath: string): Promise<string | null> {
 	}
 }
 
-function buildSceneSvg(spec: Required<LocalStoryboardSceneInput>, width: number, height: number): string {
+function buildSceneSvg(spec: ParsedStoryboardSceneSpec, width: number, height: number): string {
 	const seed = hashString(`${spec.sceneIndex}-${spec.description}-${spec.camera}-${spec.lighting}`)
 	const rng = mulberry32(seed)
 	const innerWidth = width - 48
 	const innerHeight = height - 220
 	const sketch = buildSketchTemplate(spec, innerWidth, innerHeight, rng)
-	const captionLines = wrapText(spec.description, 52, 3)
-	const metaLeft = `${spec.camera} • ${spec.durationS}s`
-	const metaRight = spec.lighting
+	const captionLines = wrapText(spec.childCaption || spec.description, 52, 3)
+	const metaLeft = `${truncateText(spec.framing || spec.camera, 22)} • ${spec.durationS}s`
+	const metaRight = truncateText(spec.primarySubject || spec.lighting, 22)
 
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
@@ -269,18 +351,30 @@ function buildBoardSvg(args: {
 </svg>`
 }
 
-function buildSketchTemplate(spec: Required<LocalStoryboardSceneInput>, width: number, height: number, rng: () => number): string {
-	const text = `${spec.description} ${spec.camera} ${spec.lighting}`.toLowerCase()
+function buildSketchTemplate(spec: ParsedStoryboardSceneSpec, width: number, height: number, rng: () => number): string {
+	const text = [
+		spec.description,
+		spec.camera,
+		spec.lighting,
+		spec.primarySubject,
+		spec.action,
+		spec.background,
+		spec.framing,
+		spec.simpleShapes.join(' '),
+		spec.importantObjects.join(' '),
+		spec.drawingSteps.join(' '),
+	].join(' ').toLowerCase()
 	if (/(oeil|eye|iris|pupil)/i.test(text)) return drawEye(width, height, rng)
 	if (/(bouche|levre|mouth|lips)/i.test(text)) return drawMouth(width, height, rng)
 	if (/(main|hand|flacon|bottle|produit|product|parfum|perfume)/i.test(text)) return drawHandProduct(width, height, rng)
 	if (/(profil|profile|epaule|shoulder|nuque|side)/i.test(text)) return drawProfile(width, height, rng)
 	if (/(visage|face|portrait|nez|nose|close up|gros plan)/i.test(text)) return drawFace(width, height, rng)
+	if (hasCloudPlan(spec)) return drawPlanDrivenScene(spec, width, height, rng)
 	if (/(montagne|paysage|landscape|chien|dog|sunrise|soleil|outdoor)/i.test(text)) return drawLandscape(spec, width, height, rng)
 	return drawGeneric(width, height, rng)
 }
 
-function drawLandscape(spec: Required<LocalStoryboardSceneInput>, width: number, height: number, rng: () => number): string {
+function drawLandscape(spec: ParsedStoryboardSceneSpec, width: number, height: number, rng: () => number): string {
 	const text = `${spec.description} ${spec.camera} ${spec.lighting}`.toLowerCase()
 	const isSleeping = /(endorm|endort|dort|sommeil|sleep|allonge|couche)/.test(text)
 	const hasBirds = /(oiseau|bird)/.test(text)
@@ -309,6 +403,56 @@ function drawLandscape(spec: Required<LocalStoryboardSceneInput>, width: number,
 				]
 			: []),
 	].join('')
+}
+
+function drawPlanDrivenScene(spec: ParsedStoryboardSceneSpec, width: number, height: number, rng: () => number): string {
+	const text = [
+		spec.primarySubject,
+		spec.action,
+		spec.background,
+		spec.framing,
+		spec.lighting,
+		spec.simpleShapes.join(' '),
+		spec.importantObjects.join(' '),
+	].join(' ').toLowerCase()
+	const pieces: string[] = []
+	const subjectX = width * 0.45
+	const subjectY = height * 0.64
+	const iconScale = Math.max(0.8, Math.min(1.3, width / 860))
+
+	pieces.push(drawBackdropFromPlan(text, width, height, rng))
+
+	if (/(chien|dog)/.test(text)) {
+		pieces.push(drawDog(subjectX, subjectY, rng, resolveDogPose(text)))
+	} else if (/(chat|cat)/.test(text)) {
+		pieces.push(drawSimpleCat(subjectX, subjectY - 10, 1.15, rng))
+	} else if (/(voiture|car|auto|vehicule)/.test(spec.primarySubject.toLowerCase())) {
+		pieces.push(drawSimpleCar(subjectX - 90, subjectY - 40, 1.25, rng))
+	} else if (/(visage|face|portrait)/.test(text) || /(close|gros plan|portrait)/.test(`${spec.camera} ${spec.framing}`.toLowerCase())) {
+		pieces.push(drawFace(width, height, rng))
+	} else {
+		pieces.push(drawStickFigure(subjectX, subjectY, 1.15, rng, resolveFigurePose(text)))
+	}
+
+	const icons = uniquePlanKeywords(spec).slice(0, 3)
+	const positions = [
+		{ x: width * 0.18, y: height * 0.3 },
+		{ x: width * 0.74, y: height * 0.3 },
+		{ x: width * 0.74, y: height * 0.6 },
+	]
+
+	icons.forEach((keyword, index) => {
+		const position = positions[index]
+		if (!position) return
+		pieces.push(drawPlanIcon(keyword, position.x, position.y, iconScale, rng))
+	})
+
+	if (/(course|run|court|marche|walk|dance|danse|jump|saute)/.test(text)) {
+		pieces.push(roughPath(`M ${subjectX + 70} ${subjectY - 30} l 70 -12`, rng, 'light'))
+		pieces.push(roughPath(`M ${subjectX + 66} ${subjectY + 4} l 84 -4`, rng, 'light'))
+	}
+
+	return pieces.join('')
 }
 
 function drawHandProduct(width: number, height: number, rng: () => number): string {
@@ -422,15 +566,278 @@ function drawDog(x: number, y: number, rng: () => number, pose: 'standing' | 'mo
 	].join('')
 }
 
-function buildNotes(spec: Required<LocalStoryboardSceneInput>, width: number, height: number, rng: () => number): string {
-	const noteA = truncateText(spec.camera, 18)
-	const noteB = truncateText(spec.lighting, 18)
+function buildNotes(spec: ParsedStoryboardSceneSpec, width: number, height: number, rng: () => number): string {
+	const noteA = truncateText(spec.drawingSteps[0] || spec.action || spec.camera, 24)
+	const noteB = truncateText(spec.kidNotes[0] || spec.background || spec.lighting, 24)
 	return [
 		roughPath(`M ${width - 260} 68 l 100 -28`, rng, 'light'),
 		roughPath(`M 100 ${height - 100} l 130 -38`, rng, 'light'),
 		`<text x="${width - 148}" y="54" class="small">${escapeXml(noteA)}</text>`,
 		`<text x="110" y="${height - 110}" class="small">${escapeXml(noteB)}</text>`,
 	].join('')
+}
+
+function hasCloudPlan(spec: ParsedStoryboardSceneSpec): boolean {
+	return Boolean(
+		spec.planTitle ||
+		spec.childCaption ||
+		spec.primarySubject ||
+		spec.action ||
+		spec.background ||
+		spec.framing ||
+		spec.simpleShapes.length > 0 ||
+		spec.importantObjects.length > 0 ||
+		spec.drawingSteps.length > 0 ||
+		spec.kidNotes.length > 0,
+	)
+}
+
+function drawBackdropFromPlan(text: string, width: number, height: number, rng: () => number): string {
+	if (/(space|espace|mars|moon|lune|planet|planete|rocket|fusee|star)/.test(text)) {
+		return [
+			roughPath(`M 60 ${height - 92} Q 260 ${height - 136} 520 ${height - 110} T ${width - 70} ${height - 98}`, rng, 'ink'),
+			roughCircle(width - 180, 112, 42, rng, 'thin'),
+			...Array.from({ length: 7 }, (_, index) => roughCircle(120 + index * 110, 70 + (index % 2) * 36, 4, rng, 'light')),
+		].join('')
+	}
+
+	if (/(room|interior|inside|bedroom|chambre|kitchen|cuisine|classroom|classe|office|bureau)/.test(text)) {
+		return [
+			roughPath(`M 90 70 V ${height - 90} H ${width - 90}`, rng, 'ink'),
+			roughRect(width - 280, 120, 140, 110, rng, 'thin', 8),
+			roughPath(`M ${width - 210} 120 V 230`, rng, 'thin'),
+			roughPath(`M ${width - 280} 174 H ${width - 140}`, rng, 'thin'),
+			roughRect(120, height - 160, 180, 60, rng, 'thin', 10),
+		].join('')
+	}
+
+	if (/(city|ville|street|rue|road|route|traffic)/.test(text)) {
+		return [
+			roughPath(`M 70 ${height - 90} H ${width - 70}`, rng, 'ink'),
+			roughRect(120, height - 280, 120, 190, rng, 'thin', 6),
+			roughRect(280, height - 240, 90, 150, rng, 'thin', 6),
+			roughRect(width - 310, height - 300, 130, 210, rng, 'thin', 6),
+		].join('')
+	}
+
+	if (/(beach|plage|sea|mer|ocean)/.test(text)) {
+		return [
+			roughPath(`M 60 ${height - 210} Q 260 ${height - 230} 520 ${height - 210} T ${width - 60} ${height - 206}`, rng, 'light'),
+			roughPath(`M 60 ${height - 108} Q 260 ${height - 128} 520 ${height - 110} T ${width - 60} ${height - 104}`, rng, 'ink'),
+			roughCircle(width - 170, 118, 44, rng, 'light'),
+		].join('')
+	}
+
+	if (/(mountain|montagne|forest|foret|park|parc|garden|jardin|outdoor|nature)/.test(text)) {
+		return [
+			roughPath(`M 70 ${height - 170} Q 260 ${height - 320} 480 ${height - 190} T ${width - 80} ${height - 176}`, rng, 'ink'),
+			roughPath(`M 60 ${height - 78} Q 300 ${height - 122} 560 ${height - 90} T ${width - 60} ${height - 74}`, rng, 'ink'),
+			roughCircle(width - 180, 108, 40, rng, 'light'),
+			...Array.from({ length: 3 }, (_, index) => drawSimpleTree(150 + index * 120, height - 126 - (index % 2) * 12, 0.82, rng)),
+		].join('')
+	}
+
+	return roughPath(`M 70 ${height - 92} Q 320 ${height - 120} 620 ${height - 100} T ${width - 60} ${height - 88}`, rng, 'ink')
+}
+
+function drawStickFigure(x: number, y: number, scale: number, rng: () => number, pose: 'standing' | 'running' | 'jumping' | 'pointing' | 'holding' | 'dancing'): string {
+	const headR = 28 * scale
+	const shoulderY = y - 74 * scale
+	const hipY = y + 6 * scale
+	const leftArmEnd = pose === 'pointing' ? `${x - 10 * scale} ${y - 24 * scale}` : `${x - 56 * scale} ${y - 12 * scale}`
+	const rightArmEnd = pose === 'pointing'
+		? `${x + 86 * scale} ${y - 42 * scale}`
+		: pose === 'holding'
+			? `${x + 54 * scale} ${y + 6 * scale}`
+			: `${x + 58 * scale} ${y - 10 * scale}`
+	const leftLegEnd = pose === 'running' ? `${x - 64 * scale} ${y + 110 * scale}` : `${x - 46 * scale} ${y + 120 * scale}`
+	const rightLegEnd = pose === 'running'
+		? `${x + 84 * scale} ${y + 90 * scale}`
+		: pose === 'jumping'
+			? `${x + 44 * scale} ${y + 88 * scale}`
+			: `${x + 46 * scale} ${y + 120 * scale}`
+
+	return [
+		roughCircle(x, y - 118 * scale, headR, rng, 'ink'),
+		roughPath(`M ${x} ${y - 90 * scale} V ${hipY}`, rng, 'ink'),
+		roughPath(`M ${x - 46 * scale} ${shoulderY} H ${x + 42 * scale}`, rng, 'thin'),
+		roughPath(`M ${x - 8 * scale} ${shoulderY} L ${leftArmEnd}`, rng, 'thin'),
+		roughPath(`M ${x + 10 * scale} ${shoulderY} L ${rightArmEnd}`, rng, 'thin'),
+		roughPath(`M ${x} ${hipY} L ${leftLegEnd}`, rng, 'thin'),
+		roughPath(`M ${x} ${hipY} L ${rightLegEnd}`, rng, 'thin'),
+		...(pose === 'dancing'
+			? [
+				roughPath(`M ${x - 88 * scale} ${y - 138 * scale} q 18 -18 36 0`, rng, 'light'),
+				roughPath(`M ${x + 56 * scale} ${y - 150 * scale} q 18 -18 36 0`, rng, 'light'),
+			]
+			: []),
+	].join('')
+}
+
+function drawSimpleCar(x: number, y: number, scale: number, rng: () => number): string {
+	const w = 140 * scale
+	const h = 54 * scale
+	return [
+		roughRect(x, y, w, h, rng, 'ink', 10),
+		roughPath(`M ${x + 24 * scale} ${y} q 18 -36 52 -36 h 24 q 28 0 48 36`, rng, 'ink'),
+		roughCircle(x + 34 * scale, y + h, 16 * scale, rng, 'thin'),
+		roughCircle(x + 108 * scale, y + h, 16 * scale, rng, 'thin'),
+	].join('')
+}
+
+function drawSimpleHouse(x: number, y: number, scale: number, rng: () => number): string {
+	const w = 96 * scale
+	const h = 82 * scale
+	return [
+		roughRect(x, y, w, h, rng, 'ink', 4),
+		roughPath(`M ${x - 10 * scale} ${y + 6 * scale} L ${x + w / 2} ${y - 42 * scale} L ${x + w + 10 * scale} ${y + 6 * scale}`, rng, 'ink'),
+		roughRect(x + 34 * scale, y + 36 * scale, 26 * scale, 46 * scale, rng, 'thin', 2),
+	].join('')
+}
+
+function drawSimpleTree(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughPath(`M ${x} ${y} V ${y + 56 * scale}`, rng, 'ink'),
+		roughCircle(x, y - 12 * scale, 28 * scale, rng, 'thin'),
+		roughCircle(x - 20 * scale, y + 6 * scale, 22 * scale, rng, 'thin'),
+		roughCircle(x + 20 * scale, y + 8 * scale, 22 * scale, rng, 'thin'),
+	].join('')
+}
+
+function drawSimplePhone(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughRect(x, y, 52 * scale, 92 * scale, rng, 'ink', 8),
+		roughRect(x + 10 * scale, y + 12 * scale, 32 * scale, 54 * scale, rng, 'thin', 4),
+		roughCircle(x + 26 * scale, y + 78 * scale, 4 * scale, rng, 'thin'),
+	].join('')
+}
+
+function drawSimpleBook(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughPath(`M ${x} ${y} q 24 -18 52 0 v 70 q -28 -16 -52 0 z`, rng, 'ink'),
+		roughPath(`M ${x + 52 * scale} ${y} q 24 -18 52 0 v 70 q -28 -16 -52 0 z`, rng, 'ink'),
+		roughPath(`M ${x + 52 * scale} ${y} V ${y + 70 * scale}`, rng, 'thin'),
+	].join('')
+}
+
+function drawSimpleRocket(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughPath(`M ${x + 26 * scale} ${y - 46 * scale} q 24 20 24 54 v 46 q 0 24 -24 42 q -24 -18 -24 -42 v -46 q 0 -34 24 -54 z`, rng, 'ink'),
+		roughCircle(x + 26 * scale, y + 6 * scale, 12 * scale, rng, 'thin'),
+		roughPath(`M ${x + 2 * scale} ${y + 58 * scale} l -18 28`, rng, 'thin'),
+		roughPath(`M ${x + 50 * scale} ${y + 58 * scale} l 18 28`, rng, 'thin'),
+		roughPath(`M ${x + 26 * scale} ${y + 100 * scale} q -14 20 0 44 q 14 -24 0 -44`, rng, 'light'),
+	].join('')
+}
+
+function drawSimpleBall(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughCircle(x, y, 26 * scale, rng, 'ink'),
+		roughPath(`M ${x - 20 * scale} ${y} q 20 -16 40 0`, rng, 'thin'),
+		roughPath(`M ${x} ${y - 20 * scale} q -16 20 0 40`, rng, 'thin'),
+	].join('')
+}
+
+function drawSimpleGift(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughRect(x, y, 74 * scale, 58 * scale, rng, 'ink', 4),
+		roughPath(`M ${x + 37 * scale} ${y} V ${y + 58 * scale}`, rng, 'thin'),
+		roughPath(`M ${x} ${y + 20 * scale} H ${x + 74 * scale}`, rng, 'thin'),
+		roughPath(`M ${x + 37 * scale} ${y} q -24 -26 -34 0 q 10 18 34 12`, rng, 'ink'),
+		roughPath(`M ${x + 37 * scale} ${y} q 24 -26 34 0 q -10 18 -34 12`, rng, 'ink'),
+	].join('')
+}
+
+function drawSimpleBottle(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughRect(x, y + 16 * scale, 44 * scale, 78 * scale, rng, 'ink', 8),
+		roughRect(x + 12 * scale, y, 20 * scale, 22 * scale, rng, 'thin', 4),
+	].join('')
+}
+
+function drawSimpleSun(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughCircle(x, y, 22 * scale, rng, 'ink'),
+		...Array.from({ length: 8 }, (_, index) => {
+			const angle = (Math.PI * 2 * index) / 8
+			const sx = x + Math.cos(angle) * 30 * scale
+			const sy = y + Math.sin(angle) * 30 * scale
+			const ex = x + Math.cos(angle) * 48 * scale
+			const ey = y + Math.sin(angle) * 48 * scale
+			return roughPath(`M ${sx} ${sy} L ${ex} ${ey}`, rng, 'thin')
+		}),
+	].join('')
+}
+
+function drawSimpleCloud(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughCircle(x, y, 18 * scale, rng, 'thin'),
+		roughCircle(x + 22 * scale, y - 10 * scale, 20 * scale, rng, 'thin'),
+		roughCircle(x + 44 * scale, y, 18 * scale, rng, 'thin'),
+		roughPath(`M ${x - 16 * scale} ${y + 10 * scale} H ${x + 60 * scale}`, rng, 'thin'),
+	].join('')
+}
+
+function drawSimpleCat(x: number, y: number, scale: number, rng: () => number): string {
+	return [
+		roughCircle(x, y - 34 * scale, 24 * scale, rng, 'ink'),
+		roughPath(`M ${x - 18 * scale} ${y - 54 * scale} l -10 -16`, rng, 'ink'),
+		roughPath(`M ${x + 18 * scale} ${y - 54 * scale} l 10 -16`, rng, 'ink'),
+		roughPath(`M ${x - 24 * scale} ${y - 8 * scale} q 24 -18 48 0 q -8 42 -44 46 q -32 -6 -42 -46 z`, rng, 'ink'),
+		roughPath(`M ${x + 32 * scale} ${y + 18 * scale} q 26 10 24 34`, rng, 'thin'),
+	].join('')
+}
+
+function drawPlanIcon(keyword: string, x: number, y: number, scale: number, rng: () => number): string {
+	const text = keyword.toLowerCase()
+	if (/(voiture|car|auto|vehicule)/.test(text)) return drawSimpleCar(x - 62 * scale, y - 12 * scale, scale, rng)
+	if (/(maison|house|home)/.test(text)) return drawSimpleHouse(x - 42 * scale, y - 12 * scale, scale, rng)
+	if (/(arbre|tree|forest|foret)/.test(text)) return drawSimpleTree(x, y, scale, rng)
+	if (/(phone|telephone|mobile)/.test(text)) return drawSimplePhone(x - 26 * scale, y - 20 * scale, scale, rng)
+	if (/(livre|book|cahier)/.test(text)) return drawSimpleBook(x - 52 * scale, y - 10 * scale, scale, rng)
+	if (/(rocket|fusee|spaceship)/.test(text)) return drawSimpleRocket(x - 26 * scale, y + 6 * scale, scale, rng)
+	if (/(ball|ballon|balle)/.test(text)) return drawSimpleBall(x, y, scale, rng)
+	if (/(gift|cadeau|box|boite)/.test(text)) return drawSimpleGift(x - 36 * scale, y - 10 * scale, scale, rng)
+	if (/(bottle|flacon|perfume|parfum)/.test(text)) return drawSimpleBottle(x - 22 * scale, y - 18 * scale, scale, rng)
+	if (/(sun|soleil)/.test(text)) return drawSimpleSun(x, y, scale, rng)
+	if (/(cloud|nuage)/.test(text)) return drawSimpleCloud(x - 20 * scale, y, scale, rng)
+	if (/(chien|dog)/.test(text)) return drawDog(x, y + 12 * scale, rng, 'standing')
+	if (/(chat|cat)/.test(text)) return drawSimpleCat(x, y + 10 * scale, scale, rng)
+	return roughRect(x - 32 * scale, y - 24 * scale, 64 * scale, 48 * scale, rng, 'thin', 10)
+}
+
+function resolveDogPose(text: string): 'standing' | 'moving' | 'sleeping' | 'waking' {
+	if (/(sleep|dort|sommeil|endormi)/.test(text)) return 'sleeping'
+	if (/(wake|reveille)/.test(text)) return 'waking'
+	if (/(run|court|marche|move|walk|dance|danse)/.test(text)) return 'moving'
+	return 'standing'
+}
+
+function resolveFigurePose(text: string): 'standing' | 'running' | 'jumping' | 'pointing' | 'holding' | 'dancing' {
+	if (/(run|court|marche|walk|move)/.test(text)) return 'running'
+	if (/(jump|saute|leap)/.test(text)) return 'jumping'
+	if (/(point|montre|indique)/.test(text)) return 'pointing'
+	if (/(hold|tient|porte|carry|montre un objet)/.test(text)) return 'holding'
+	if (/(dance|danse|music|musique)/.test(text)) return 'dancing'
+	return 'standing'
+}
+
+function uniquePlanKeywords(spec: ParsedStoryboardSceneSpec): string[] {
+	const items = [
+		spec.primarySubject,
+		spec.background,
+		...spec.importantObjects,
+		...spec.simpleShapes,
+	]
+	const seen = new Set<string>()
+	const results: string[] = []
+	for (const item of items) {
+		const clean = toAscii(item).toLowerCase()
+		if (!clean || seen.has(clean)) continue
+		seen.add(clean)
+		results.push(clean)
+	}
+	return results
 }
 
 function buildHatching(width: number, height: number, rng: () => number): string {
@@ -469,6 +876,16 @@ function readPrefixedValue(lines: string[], key: string): string | null {
 	const prefix = `${key.toLowerCase()}:`
 	const line = lines.find((entry) => entry.toLowerCase().startsWith(prefix))
 	return line ? line.slice(prefix.length).trim() : null
+}
+
+function readPrefixedList(lines: string[], key: string): string[] {
+	const value = readPrefixedValue(lines, key)
+	if (!value) return []
+	return value
+		.split(/\||;|,/)
+		.map((part) => toAscii(part))
+		.filter(Boolean)
+		.slice(0, 8)
 }
 
 function firstSentence(text: string): string {

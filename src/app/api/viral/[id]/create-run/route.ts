@@ -12,7 +12,7 @@ import type { ViralManifest, ViralSegment } from '@/lib/viral/viral-types'
  *
  * Crée un run pipeline depuis un segment viral.
  *
- * Body : { segmentIndex: number, chainId: string }
+ * Body : { segmentIndex: number, chainId?: string, options?: { crop916?: boolean, burnSubtitles?: boolean } }
  *
  * - Lit segments.json de la session virale
  * - Construit l'idée depuis le titre du segment
@@ -28,12 +28,19 @@ export async function POST(
   const { id: viralId } = await params
 
   try {
-    const body = await request.json() as { segmentIndex?: number; chainId?: string }
-    const { segmentIndex, chainId } = body
+    const body = await request.json() as {
+      segmentIndex?: number
+      chainId?: string
+      options?: {
+        crop916?: boolean
+        burnSubtitles?: boolean
+      }
+    }
+    const { segmentIndex, chainId, options } = body
 
-    if (typeof segmentIndex !== 'number' || !chainId) {
+    if (typeof segmentIndex !== 'number') {
       return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: 'segmentIndex (number) et chainId (string) requis' } },
+        { error: { code: 'VALIDATION_ERROR', message: 'segmentIndex (number) requis' } },
         { status: 400 },
       )
     }
@@ -78,7 +85,7 @@ export async function POST(
     const idea = `[Viral ${segmentIndex + 1}/${segments.length}] ${segment.title}`
     const runId = crypto.randomUUID()
 
-    await createRun({ id: runId, chainId, idea, type: 'viral' })
+    await createRun({ id: runId, chainId: chainId ?? null, idea, type: 'viral' })
 
     // Créer les dossiers run
     const runPath = join(process.cwd(), 'storage', 'runs', runId)
@@ -95,6 +102,10 @@ export async function POST(
       segmentIndex,
       segment,
       sourceUrl: manifest.url,
+      options: {
+        crop916: options?.crop916 ?? false,
+        burnSubtitles: options?.burnSubtitles ?? false,
+      },
       createdAt: new Date().toISOString(),
     }
     await writeFile(join(runPath, 'viral-source.json'), JSON.stringify(viralSource, null, 2))
@@ -120,7 +131,7 @@ export async function POST(
           viralId,
           segmentIndex,
           idea,
-          chainId,
+          chainId: chainId ?? null,
           createdAt: new Date().toISOString(),
         },
       },

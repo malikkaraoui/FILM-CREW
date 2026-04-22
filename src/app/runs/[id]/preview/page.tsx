@@ -27,6 +27,10 @@ type StoryboardImage = {
   providerUsed?: string | null
   failoverOccurred?: boolean
   isPlaceholder?: boolean
+  cloudPlanStatus?: 'queued' | 'ready' | 'failed' | null
+  cloudPlanModel?: string | null
+  cloudPlanMode?: string | null
+  cloudPlanAppliedAt?: string | null
 }
 
 type PreviewManifest = {
@@ -91,6 +95,7 @@ export default function PreviewPage() {
   const [regenerating, setRegenerating] = useState<Record<number, boolean>>({})
   const [regenResult, setRegenResult] = useState<Record<number, { ok: boolean; provider: string; failover: boolean; error?: string }>>({})
   const [promptDrafts, setPromptDrafts] = useState<Record<number, { prompt: string; negativePrompt: string }>>({})
+  const [storyboardAssetVersion, setStoryboardAssetVersion] = useState('0')
 
   const loadClips = useCallback(async () => {
     try {
@@ -123,6 +128,7 @@ export default function PreviewPage() {
       const json = await res.json()
       if (json.data?.images) setStoryboard(json.data.images)
     } catch { /* silencieux */ }
+    setStoryboardAssetVersion(`${Date.now()}`)
   }, [id])
 
   const loadManifest = useCallback(async () => {
@@ -176,6 +182,16 @@ export default function PreviewPage() {
       loadDirectorPlan(),
     ]).then(() => setLoading(false))
   }, [loadClips, loadPrompts, loadStoryboard, loadManifest, loadFailoverLog, loadPublishContext, loadDirectorPlan])
+
+  useEffect(() => {
+    if (!storyboard.some((image) => image.cloudPlanStatus === 'queued')) return
+
+    const interval = window.setInterval(() => {
+      void loadStoryboard()
+    }, 4000)
+
+    return () => window.clearInterval(interval)
+  }, [storyboard, loadStoryboard])
 
   async function savePrompt(sceneIndex: number) {
     const draft = promptDrafts[sceneIndex]
@@ -440,7 +456,7 @@ export default function PreviewPage() {
                     ) : (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={`/api/runs/${id}/storyboard/image/${img.sceneIndex}`}
+                        src={`/api/runs/${id}/storyboard/image/${img.sceneIndex}?v=${encodeURIComponent(`${storyboardAssetVersion}-${img.cloudPlanAppliedAt || img.filePath}`)}`}
                         alt={`Scène ${img.sceneIndex}`}
                         className="w-full h-full object-contain bg-white"
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
@@ -453,6 +469,15 @@ export default function PreviewPage() {
                       <Badge variant="secondary" className="text-[9px]">
                         {img.isPlaceholder ? 'Placeholder local' : img.status === 'generated' ? 'Généré' : img.status}
                       </Badge>
+                      {img.cloudPlanStatus && (
+                        <Badge variant={img.cloudPlanStatus === 'failed' ? 'destructive' : 'outline'} className="text-[9px]">
+                          {img.cloudPlanStatus === 'queued'
+                            ? 'Cloud en cours'
+                            : img.cloudPlanAppliedAt
+                              ? 'Cloud appliqué'
+                              : 'Cloud prêt'}
+                        </Badge>
+                      )}
                       {regen && (
                         <Badge
                           variant={regen.ok ? 'default' : 'destructive'}

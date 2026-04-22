@@ -5,6 +5,11 @@ import type { LLMProvider } from '@/lib/providers/types'
 import type { PipelineStep, StepContext, StepResult } from '../types'
 import type { DirectorPlan } from './step-3-json'
 import { logger } from '@/lib/logger'
+import {
+  getBlueprintScene,
+  readStoryboardBlueprint,
+  type StructuredStoryDocument,
+} from '@/lib/storyboard/blueprint'
 
 export type PromptManifestEntry = {
   sceneIndex: number
@@ -35,14 +40,14 @@ export type PromptManifest = {
 
 export const step5Prompts: PipelineStep = {
   name: 'Prompts Seedance',
-  stepNumber: 5,
+  stepNumber: 6,
 
   async execute(ctx: StepContext): Promise<StepResult> {
     // Lire la structure JSON
-    let structure: { tone?: string; style?: string; scenes: { index: number; description: string; dialogue: string; camera: string; lighting: string }[] }
+    let structure: StructuredStoryDocument
     try {
       const raw = await readFile(join(ctx.storagePath, 'structure.json'), 'utf-8')
-      structure = JSON.parse(raw)
+      structure = JSON.parse(raw) as StructuredStoryDocument
     } catch {
       return { success: false, costEur: 0, outputData: null, error: 'structure.json introuvable' }
     }
@@ -53,6 +58,8 @@ export const step5Prompts: PipelineStep = {
       const raw = await readFile(join(ctx.storagePath, 'director-plan.json'), 'utf-8')
       directorPlan = JSON.parse(raw) as DirectorPlan
     } catch { /* pas de director-plan — mode dégradé */ }
+
+    const blueprint = await readStoryboardBlueprint(ctx.storagePath)
 
     // Charger le Brand Kit pour le prompt anchoring
     let brandContext = ''
@@ -101,7 +108,29 @@ Retourne UNIQUEMENT le JSON.`,
             },
             {
               role: 'user',
-              content: `Scènes :\n${JSON.stringify(structure.scenes, null, 2)}`,
+              content: `Scènes :\n${JSON.stringify(structure.scenes.map((scene) => {
+                const blueprintScene = getBlueprintScene(blueprint, scene.index)
+                const shotEntry = directorPlan?.shotList.find((entry) => entry.sceneIndex === scene.index)
+                return {
+                  ...scene,
+                  storyboardBlueprint: blueprintScene
+                    ? {
+                        panelTitle: blueprintScene.panelTitle,
+                        childCaption: blueprintScene.childCaption,
+                        primarySubject: blueprintScene.primarySubject,
+                        action: blueprintScene.action,
+                        background: blueprintScene.background,
+                        framing: blueprintScene.framing,
+                        lighting: blueprintScene.lighting,
+                        importantObjects: blueprintScene.importantObjects,
+                        drawingSteps: blueprintScene.drawingSteps,
+                        kidNotes: blueprintScene.kidNotes,
+                        emotion: blueprintScene.emotion,
+                      }
+                    : null,
+                  directorIntent: shotEntry?.intent ?? '',
+                }
+              }), null, 2)}`,
             },
           ],
           { temperature: 0.7, maxTokens: 3000 },
@@ -147,15 +176,16 @@ Retourne UNIQUEMENT le JSON.`,
       prompts: parsed.prompts.map((p) => {
         const scene = structure.scenes.find((s) => s.index === p.sceneIndex)
         const shotEntry = directorPlan?.shotList.find((s) => s.sceneIndex === p.sceneIndex)
+        const blueprintScene = getBlueprintScene(blueprint, p.sceneIndex)
         return {
           sceneIndex: p.sceneIndex,
           prompt: p.prompt,
           negativePrompt: p.negativePrompt,
           sources: {
-            descriptionSnippet: scene?.description?.slice(0, 80) ?? '',
-            camera: scene?.camera ?? 'fixe',
-            lighting: scene?.lighting ?? 'naturel',
-            directorNote: shotEntry?.intent?.slice(0, 80) ?? '',
+            descriptionSnippet: blueprintScene?.childCaption?.slice(0, 80) ?? scene?.description?.slice(0, 80) ?? '',
+            camera: blueprintScene?.framing ?? scene?.camera ?? 'fixe',
+            lighting: blueprintScene?.lighting ?? scene?.lighting ?? 'naturel',
+            directorNote: blueprintScene?.directorIntent?.slice(0, 80) ?? shotEntry?.intent?.slice(0, 80) ?? '',
             tone,
             style,
           },
@@ -188,6 +218,7 @@ Retourne UNIQUEMENT le JSON.`,
           style,
           promptCount: manifest.prompts.length,
           directorPlanUsed: manifest.directorPlanUsed,
+          blueprintUsed: Boolean(blueprint?.scenes.length),
         },
       },
     }

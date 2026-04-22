@@ -2,17 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/connection'
 import { run, runStep, chain } from '@/lib/db/schema'
 import { logger } from '@/lib/logger'
-
-const STEP_NAMES = [
-  'Idée',
-  'Brainstorm',
-  'JSON structuré',
-  'Storyboard',
-  'Prompts Seedance',
-  'Génération',
-  'Preview',
-  'Publication',
-]
+import { PIPELINE_STEP_NAMES } from '@/lib/pipeline/constants'
 
 /**
  * POST /api/dev/seed-zombie
@@ -51,14 +41,14 @@ export async function POST() {
     })
 
     // Créer les runSteps (step 1 completed, step 2 running, reste pending)
-    for (let i = 0; i < STEP_NAMES.length; i++) {
+    for (let i = 0; i < PIPELINE_STEP_NAMES.length; i++) {
       const stepNumber = i + 1
       const status = stepNumber < ZOMBIE_STEP ? 'completed' : stepNumber === ZOMBIE_STEP ? 'running' : 'pending'
       await db.insert(runStep).values({
         id: crypto.randomUUID(),
         runId,
         stepNumber,
-        stepName: STEP_NAMES[i],
+        stepName: PIPELINE_STEP_NAMES[i],
         status,
         startedAt: stepNumber <= ZOMBIE_STEP ? new Date() : null,
         completedAt: stepNumber < ZOMBIE_STEP ? new Date() : null,

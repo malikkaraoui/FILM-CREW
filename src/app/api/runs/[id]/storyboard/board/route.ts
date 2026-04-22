@@ -16,7 +16,7 @@ export async function GET(
 
     const buffer = await readFile(manifest.boardFilePath)
     return new Response(buffer, {
-      headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=3600' },
+      headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' },
     })
   } catch {
     return new Response('Planche storyboard introuvable', { status: 404 })

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { SpeakingIndicator } from './speaking-indicator'
+import type { MeetingState } from '@/lib/agents/meeting-sequence'
 
 type TraceEntry = {
   id: string
@@ -24,7 +26,7 @@ const AGENT_NAMES: Record<string, string> = {
   mia: 'Mia — Cheffe de projet',
   lenny: 'Lenny — Scénariste',
   laura: 'Laura — Cadreuse',
-  nael: 'Naël — Metteur en scène',
+  nael: 'Nael — Metteur en scène',
   emilie: 'Emilie — Habillage',
   nico: 'Nico — Lumière',
 }
@@ -37,7 +39,15 @@ const TYPE_BADGES: Record<string, { label: string; variant: 'default' | 'seconda
   brief_section: { label: 'Brief', variant: 'default' },
 }
 
-export function AgentChat({ traces, loading }: { traces: TraceEntry[]; loading: boolean }) {
+export function AgentChat({
+  traces,
+  loading,
+  meetingState,
+}: {
+  traces: TraceEntry[]
+  loading: boolean
+  meetingState?: MeetingState | null
+}) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -101,6 +111,13 @@ export function AgentChat({ traces, loading }: { traces: TraceEntry[]; loading: 
           </div>
         )
       })}
+      {meetingState?.nextSpeaker && (
+        <SpeakingIndicator
+          agent={meetingState.nextSpeaker}
+          label={meetingState.nextSpeakerLabel}
+          phase={`Phase ${meetingState.phase.number} — ${meetingState.phase.name} · ${meetingState.progress}%`}
+        />
+      )}
       <div ref={bottomRef} />
     </div>
   )

@@ -2,7 +2,7 @@ import type { StyleTemplate } from '@/lib/templates/loader'
 
 export type StepContext = {
   runId: string
-  chainId: string
+  chainId: string | null
   idea: string
   brandKitPath: string | null
   storagePath: string

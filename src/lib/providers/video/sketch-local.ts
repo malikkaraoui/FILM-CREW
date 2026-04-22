@@ -1,14 +1,16 @@
-import { exec } from 'child_process'
-import { promisify } from 'util'
-import { writeFile, mkdir } from 'fs/promises'
+import { spawn } from 'child_process'
+import { access, mkdir, writeFile } from 'fs/promises'
+import { constants } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { VideoProvider, VideoOpts, VideoResult, ProviderHealth } from '../types'
 
-const execAsync = promisify(exec)
-
-// Sketch Local — Animation crayon à papier ultra-dégradée
-// PIL + FFmpeg: génère une animation simple avec 5fps et texte défilant
+const FONT_CANDIDATES = [
+  '/System/Library/Fonts/Supplemental/Courier New Bold.ttf',
+  '/System/Library/Fonts/Monaco.ttf',
+  '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+  '/Library/Fonts/Arial.ttf',
+]
 
 export const sketchLocalProvider: VideoProvider = {
   name: 'sketch-local',
@@ -16,8 +18,7 @@ export const sketchLocalProvider: VideoProvider = {
 
   async healthCheck(): Promise<ProviderHealth> {
     try {
-      // Vérifie que ffmpeg est disponible
-      const { stdout } = await execAsync('ffmpeg -version', { timeout: 5000 })
+      const { stdout } = await runCommand('ffmpeg', ['-version'])
       if (stdout.includes('ffmpeg')) {
         return { status: 'free', lastCheck: new Date().toISOString() }
       }
@@ -38,24 +39,53 @@ export const sketchLocalProvider: VideoProvider = {
 
     const duration = opts.duration ?? 5
     const fps = 5
-    const frameCount = duration * fps
     const outputPath = join(outputDir, `sketch-${Date.now()}.mp4`)
+    const promptPath = join(outputDir, 'prompt.txt')
+    const fontPath = await resolveFontPath()
 
-    // Créer un script Python pour générer les frames
-    const pythonScript = generatePythonScript(prompt, frameCount, outputDir)
-    const scriptPath = join(outputDir, 'generate_sketch.py')
-    await writeFile(scriptPath, pythonScript)
+    await opts.onProgress?.({
+      step: 'preparing',
+      message: 'Préparation du rendu sketch',
+      details: `Création du prompt local et choix d'une police système${fontPath ? '' : ' (fallback police par défaut ffmpeg)'}`,
+    })
+
+    await writeFile(promptPath, wrapPrompt(prompt))
+
+    const fontClause = fontPath
+      ? `fontfile='${escapeFilterValue(fontPath)}':`
+      : ''
+
+    const filterGraph = [
+      'drawbox=x=34:y=34:w=1212:h=652:color=0xffffff@0.82:t=fill',
+      'drawbox=x=58:y=58:w=1164:h=604:color=0xd9d2c3@0.28:t=2',
+      `drawtext=${fontClause}textfile='${escapeFilterValue(promptPath)}':reload=0:fontcolor=0x141414:fontsize=34:line_spacing=12:x='80+18*sin(t*1.4)':y='118+10*cos(t*0.7)':box=1:boxcolor=0xffffff@0.20:boxborderw=20`,
+      `drawtext=${fontClause}text='Sketch local - FILM CREW':fontcolor=0x555555:fontsize=20:x=80:y=h-60`,
+      `fps=${fps}`,
+    ].join(',')
 
     try {
-      // Exécuter le script Python pour générer les frames
-      await execAsync(`python3 "${scriptPath}"`, { timeout: 30000 })
+      await opts.onProgress?.({
+        step: 'rendering',
+        message: 'Rendu du sketch en local via FFmpeg',
+        details: `Animation papier ${duration}s • ${fps} fps • sortie ${outputPath}`,
+      })
 
-      // Assembler les frames en vidéo avec FFmpeg
-      const framePattern = join(outputDir, 'frame_%04d.png')
-      await execAsync(
-        `ffmpeg -framerate ${fps} -i "${framePattern}" -c:v libx264 -pix_fmt yuv420p -y "${outputPath}"`,
-        { timeout: 30000 }
-      )
+      const renderResult = await runCommand('ffmpeg', [
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-f', 'lavfi',
+        '-i', `color=c=0xF6F1E8:s=1280x720:d=${duration}`,
+        '-vf', filterGraph,
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        '-y',
+        outputPath,
+      ])
+
+      if (renderResult.code !== 0) {
+        throw new Error(renderResult.stderr.slice(0, 500) || renderResult.stdout.slice(0, 500) || 'ffmpeg a échoué sans message exploitable')
+      }
 
       return {
         filePath: outputPath,
@@ -67,54 +97,68 @@ export const sketchLocalProvider: VideoProvider = {
     }
   },
 
-  async cancel(): Promise<void> {
+  async cancel(_jobId: string): Promise<void> {
     // Pas de job asynchrone à annuler localement
   },
 }
 
-function generatePythonScript(prompt: string, frameCount: number, outputDir: string): string {
-  const escapedPrompt = prompt.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
-  return `
-import cv2
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-import os
+async function resolveFontPath(): Promise<string | undefined> {
+  for (const candidate of FONT_CANDIDATES) {
+    try {
+      await access(candidate, constants.R_OK)
+      return candidate
+    } catch {
+      // continuer
+    }
+  }
 
-output_dir = "${outputDir}"
-prompt = '${escapedPrompt}'
-frame_count = ${frameCount}
-width, height = 1280, 720
+  return undefined
+}
 
-# Créer les frames
-for i in range(frame_count):
-    # Créer une image blanche
-    img = Image.new('RGB', (width, height), color='white')
-    draw = ImageDraw.Draw(img)
+function wrapPrompt(prompt: string, maxLineLength = 48): string {
+  const clean = prompt.replace(/\s+/g, ' ').trim()
+  if (!clean) return 'Prompt vide.'
 
-    # Ajouter le texte qui défile en bas
-    text_y = height - 100
-    text_x = -int((width * i) / frame_count) + width
+  const words = clean.split(' ')
+  const lines: string[] = []
+  let currentLine = ''
 
-    try:
-        font = ImageFont.truetype("/System/Library/Fonts/Monaco.dfont", 24)
-    except:
-        font = ImageFont.load_default()
+  for (const word of words) {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word
+    if (nextLine.length > maxLineLength && currentLine) {
+      lines.push(currentLine)
+      currentLine = word
+    } else {
+      currentLine = nextLine
+    }
+  }
 
-    draw.text((text_x, text_y), prompt, fill='black', font=font)
+  if (currentLine) lines.push(currentLine)
+  return lines.slice(0, 7).join('\n')
+}
 
-    # Ajouter un effet sketch simple (edge detection)
-    img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-    gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 100, 200)
-    sketch = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+function escapeFilterValue(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, "\\'")
+}
 
-    # Mélanger: 50% original, 50% sketch
-    result = cv2.addWeighted(img_cv, 0.5, sketch, 0.5, 0)
+function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args)
+    let stdout = ''
+    let stderr = ''
 
-    # Sauvegarder le frame
-    frame_path = os.path.join(output_dir, f'frame_{i:04d}.png')
-    cv2.imwrite(frame_path, result)
-
-print(f"Generated {frame_count} frames")
-`
+    proc.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+    })
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+    proc.on('error', reject)
+    proc.on('close', (code) => {
+      resolve({ stdout, stderr, code: code ?? 1 })
+    })
+  })
 }

@@ -15,7 +15,7 @@ type PromptEntry = {
 
 export const step6Generation: PipelineStep = {
   name: 'Génération',
-  stepNumber: 6,
+  stepNumber: 7,
 
   async execute(ctx: StepContext): Promise<StepResult> {
     // Lire les prompts
@@ -46,6 +46,9 @@ export const step6Generation: PipelineStep = {
           'video',
           async (p) => {
             const video = p as VideoProvider
+            if (video.name === 'sketch-local') {
+              throw new Error('sketch-local est désactivé pour le pipeline standard : brouillon texte local non acceptable comme clip final')
+            }
             return video.generate(entry.prompt, {
               resolution: '720p',
               duration: 10,

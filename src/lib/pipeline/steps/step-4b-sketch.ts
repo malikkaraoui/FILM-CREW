@@ -8,7 +8,7 @@ import type { PipelineStep, StepContext, StepResult } from '../types'
  */
 export const step4bSketch: PipelineStep = {
   name: 'Sketch Local (noop)',
-  stepNumber: 4,
+  stepNumber: 45,
 
   async execute(_ctx: StepContext): Promise<StepResult> {
     return {

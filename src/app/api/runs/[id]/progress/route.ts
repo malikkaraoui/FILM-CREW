@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server'
 import { getRunById, getRunSteps } from '@/lib/db/queries/runs'
 import type { RunProgress, StepProgress } from '@/lib/observability/observability-types'
 import { logger } from '@/lib/logger'
-
-const TOTAL_STEPS = 8
+import { TOTAL_PIPELINE_STEPS } from '@/lib/pipeline/constants'
 
 /**
  * GET /api/runs/[id]/progress
@@ -11,7 +10,7 @@ const TOTAL_STEPS = 8
  * Retourne la progression détaillée d'un run (12A).
  *
  * Contient :
- * - progressPct  : % de progression (steps complétés / 8)
+ * - progressPct  : % de progression (steps complétés / total canonique)
  * - elapsedMs    : temps écoulé depuis la création (ms)
  * - totalCostEur : coût accumulé
  * - steps        : chaque étape avec status, coût, durée, erreur
@@ -35,7 +34,7 @@ export async function GET(
 
     // Calcul progression
     const completedCount = steps.filter((s) => s.status === 'completed').length
-    const progressPct = Math.round((completedCount / TOTAL_STEPS) * 100)
+    const progressPct = Math.round((completedCount / TOTAL_PIPELINE_STEPS) * 100)
 
     // Temps écoulé depuis la création
     const createdAt = run.createdAt ? new Date(run.createdAt).getTime() : Date.now()
@@ -64,7 +63,7 @@ export async function GET(
       runId: id,
       status: run.status,
       currentStep: run.currentStep ?? null,
-      totalSteps: TOTAL_STEPS,
+      totalSteps: TOTAL_PIPELINE_STEPS,
       progressPct,
       elapsedMs,
       totalCostEur: run.costEur ?? 0,

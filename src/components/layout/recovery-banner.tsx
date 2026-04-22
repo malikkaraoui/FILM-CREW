@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { Run } from '@/types/run'
+import { formatPipelineStepLabel } from '@/lib/pipeline/constants'
 
 export function RecoveryBanner() {
   const [interrupted, setInterrupted] = useState<Run | null>(null)
@@ -42,7 +43,7 @@ export function RecoveryBanner() {
   return (
     <div className="flex items-center justify-between border-b bg-amber-50 px-4 py-2 text-sm dark:bg-amber-950">
       <span>
-        Run interrompu détecté : « {interrupted.idea} » — étape {interrupted.currentStep}/8
+        Run interrompu détecté : « {interrupted.idea} » — {formatPipelineStepLabel(interrupted.currentStep)}
       </span>
       <Button size="sm" variant="outline" onClick={handleResolve} disabled={resolving}>
         {resolving ? 'Résolution…' : 'Résoudre'}

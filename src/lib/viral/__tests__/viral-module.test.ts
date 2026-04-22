@@ -5,7 +5,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import type { ViralSegment, ViralManifest, CreateRunFromSegmentResult, ViralSessionStatus } from '@/lib/viral/viral-types'
 import { parseViralSegmentsFromLlm } from '@/lib/viral/segment-parser'
-import { buildYouTubeSourceContext, parseVttToTranscript, selectPreferredSubtitleLanguage } from '@/lib/viral/source-context'
+import { buildTopicAnchor, buildYouTubeSourceContext, parseVttToTranscript, sanitizeTranscriptForLlm, selectPreferredSubtitleLanguage } from '@/lib/viral/source-context'
 
 /**
  * 11C — Module viral réel
@@ -328,13 +328,13 @@ describe('11C — Module viral réel', () => {
         viralId: 'viral-abc',
         segmentIndex: 0,
         idea: '[Viral 1/3] Le moment choc',
-        chainId: '6e3d5697-6cb9-4717-a377-b5574f9f84a2',
+        chainId: null,
         createdAt: new Date().toISOString(),
       }
       expect(result.runId).toBeTruthy()
       expect(result.viralId).toBeTruthy()
       expect(result.idea).toContain('[Viral')
-      expect(result.chainId).toBeTruthy()
+      expect(result.chainId).toBeNull()
     })
 
     it('idea contient le titre du segment', () => {
@@ -401,6 +401,46 @@ describe('11C — Module viral réel', () => {
       expect(parsed.segments[0].start_s).toBe(90)
       expect(parsed.segments[0].end_s).toBe(180)
     })
+
+    it('accepte start/end sans reason et applique un fallback', () => {
+      const raw = `{
+        "segments": [
+          {
+            "start": 150,
+            "end": 240,
+            "title": "Le comportement de la voiture dans un trafic urbain dense"
+          }
+        ]
+      }`
+
+      const parsed = parseViralSegmentsFromLlm(raw)
+
+      expect(parsed.parseError).toBeUndefined()
+      expect(parsed.segments).toHaveLength(1)
+      expect(parsed.segments[0].start_s).toBe(150)
+      expect(parsed.segments[0].end_s).toBe(240)
+      expect(parsed.segments[0].reason).toBe('Passage marquant détecté dans la vidéo source')
+    })
+
+    it('récupère des segments depuis une liste texte non JSON', () => {
+      const raw = `The following segments can be identified:
+
+1. Introduction (0-58): Le test présente la voiture et ses chiffres clés.
+2. Performance (59-74): Accélération et comportement dynamique.
+3. Charging system (75-86): Explication de la charge rapide.`
+
+      const parsed = parseViralSegmentsFromLlm(raw)
+
+      expect(parsed.parseError).toBeUndefined()
+      expect(parsed.segments).toHaveLength(3)
+      expect(parsed.segments[0]).toMatchObject({
+        index: 1,
+        start_s: 0,
+        end_s: 58,
+        title: 'Introduction',
+      })
+      expect(parsed.segments[1].reason).toContain('Accélération')
+    })
   })
 
   // ─── 11. Contexte source YouTube ───────────────────────────────────────
@@ -440,6 +480,40 @@ on essaie une nouvelle sportive`
 
       expect(context.transcriptSource).toBe('metadata-only')
       expect(context.transcript).toContain('Titre: Emission auto')
+    })
+
+    it('retire les lignes promo hors sujet avant envoi au LLM', () => {
+      const context = buildYouTubeSourceContext({
+        info: {
+          title: 'Turbo - essai Ferrari Roma',
+          description: 'Emission automobile sur circuit',
+          channel: 'Turbo',
+        },
+        transcript: [
+          'Bienvenue dans Turbo pour l\'essai de la Ferrari Roma',
+          'Utilisez le code promo CHAT10 sur sponsor.com',
+          'La Ferrari Roma accélère fort sur piste mouillée',
+        ].join('\n'),
+      })
+
+      const cleaned = sanitizeTranscriptForLlm(context)
+
+      expect(cleaned.totalLines).toBe(3)
+      expect(cleaned.keptLinesCount).toBe(2)
+      expect(cleaned.removedPromotionalLines).toHaveLength(1)
+      expect(cleaned.transcriptForLlm).toContain('Ferrari Roma')
+      expect(cleaned.transcriptForLlm).not.toContain('code promo CHAT10')
+    })
+
+    it('construit une ancre canonique à partir du titre', () => {
+      const anchor = buildTopicAnchor({
+        title: 'Turbo - émission spéciale voitures électriques',
+        description: 'Comparatif entre trois SUV électriques',
+        channel: 'Turbo',
+      })
+
+      expect(anchor).toContain('Titre canonique: Turbo - émission spéciale voitures électriques')
+      expect(anchor).toContain('Chaîne: Turbo')
     })
   })
 })

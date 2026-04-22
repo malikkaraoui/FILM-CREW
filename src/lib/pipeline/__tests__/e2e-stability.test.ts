@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { TOTAL_PIPELINE_STEPS } from '../constants'
 
 /**
  * 12D — E2E produit complet stable
@@ -22,16 +23,17 @@ const STEP_BUDGETS_MS = {
   step1_idea: 3 * 60_000,       // 3min — enrichissement idée + questionnaire
   step2_brainstorm: 5 * 60_000, // 5min — brainstorm LLM long
   step3_json: 3 * 60_000,       // 3min — structuration JSON
-  step4_storyboard: 5 * 60_000, // 5min — storyboard multi-scènes
-  step5_prompts: 3 * 60_000,    // 3min — prompts Seedance
+  step4_visual_blueprint: 3 * 60_000, // 3min — blueprint visuel scène par scène
+  step5_storyboard: 5 * 60_000,       // 5min — storyboard multi-scènes
+  step6_prompts: 3 * 60_000,          // 3min — prompts Seedance
 
   // Steps génération / I/O lourds
-  step6_generation: 10 * 60_000, // 10min — génération vidéo (LTX, fal, Stability)
-  step7_preview: 2 * 60_000,     // 2min — assemblage FFmpeg local
-  step8_publish: 1 * 60_000,     // 1min — upload plateforme
+  step7_generation: 10 * 60_000, // 10min — génération vidéo (LTX, fal, Stability)
+  step8_preview: 2 * 60_000,     // 2min — assemblage FFmpeg local
+  step9_publish: 1 * 60_000,     // 1min — upload plateforme
 
-  // Budget run complet (somme steps = 32min + marge overhead transitions)
-  full_run: 35 * 60_000,         // 35min — pipeline complet nominal avec overhead
+  // Budget run complet (somme steps = 35min + marge overhead transitions)
+  full_run: 40 * 60_000,         // 40min — pipeline complet nominal avec overhead
 
   // Seuil zombie (12C) — doit être > tout step sauf génération (couvert par heartbeat)
   zombie_threshold: 5 * 60_000,  // 5min entre deux heartbeats
@@ -40,18 +42,19 @@ const STEP_BUDGETS_MS = {
 // ─── 1. Budgets temps — cohérence avec le seuil zombie ──────────────────────
 
 describe('12D — Budgets temps — cohérence seuils', () => {
-  it('step 1 à 5 ont un budget < seuil zombie', () => {
+  it('les steps texte bornés restent sous le seuil zombie', () => {
     // Ces steps courts doivent rentrer dans le seuil zombie
     // (heartbeat toutes les 60s les couvre de toute façon)
     expect(STEP_BUDGETS_MS.step1_idea).toBeLessThan(STEP_BUDGETS_MS.zombie_threshold)
     expect(STEP_BUDGETS_MS.step3_json).toBeLessThan(STEP_BUDGETS_MS.zombie_threshold)
-    expect(STEP_BUDGETS_MS.step5_prompts).toBeLessThan(STEP_BUDGETS_MS.zombie_threshold)
+    expect(STEP_BUDGETS_MS.step4_visual_blueprint).toBeLessThan(STEP_BUDGETS_MS.zombie_threshold)
+    expect(STEP_BUDGETS_MS.step6_prompts).toBeLessThan(STEP_BUDGETS_MS.zombie_threshold)
   })
 
-  it('step 6 (génération) dépasse le seuil zombie — couvert par heartbeat 60s', () => {
-    // Step 6 peut prendre 10min > seuil zombie 5min
+  it('step 7 (génération) dépasse le seuil zombie — couvert par heartbeat 60s', () => {
+    // Step 7 peut prendre 10min > seuil zombie 5min
     // Acceptable car le heartbeat bat toutes les 60s pendant le step
-    expect(STEP_BUDGETS_MS.step6_generation).toBeGreaterThan(STEP_BUDGETS_MS.zombie_threshold)
+    expect(STEP_BUDGETS_MS.step7_generation).toBeGreaterThan(STEP_BUDGETS_MS.zombie_threshold)
     // Vérifier que 60s * N < zombie_threshold pour que le heartbeat protège
     const heartbeatInterval = 60_000
     const heartbeatsBeforeThreshold = Math.floor(STEP_BUDGETS_MS.zombie_threshold / heartbeatInterval)
@@ -63,11 +66,12 @@ describe('12D — Budgets temps — cohérence seuils', () => {
       STEP_BUDGETS_MS.step1_idea +
       STEP_BUDGETS_MS.step2_brainstorm +
       STEP_BUDGETS_MS.step3_json +
-      STEP_BUDGETS_MS.step4_storyboard +
-      STEP_BUDGETS_MS.step5_prompts +
-      STEP_BUDGETS_MS.step6_generation +
-      STEP_BUDGETS_MS.step7_preview +
-      STEP_BUDGETS_MS.step8_publish
+      STEP_BUDGETS_MS.step4_visual_blueprint +
+      STEP_BUDGETS_MS.step5_storyboard +
+      STEP_BUDGETS_MS.step6_prompts +
+      STEP_BUDGETS_MS.step7_generation +
+      STEP_BUDGETS_MS.step8_preview +
+      STEP_BUDGETS_MS.step9_publish
     expect(STEP_BUDGETS_MS.full_run).toBeGreaterThanOrEqual(sumSteps)
   })
 
@@ -100,7 +104,7 @@ describe('12D — Cycle nominal — transitions d\'état', () => {
       id,
       status: 'pending',
       currentStep: 1,
-      steps: Array.from({ length: 8 }, (_, i) => ({
+      steps: Array.from({ length: TOTAL_PIPELINE_STEPS }, (_, i) => ({
         stepNumber: i + 1,
         status: 'pending',
         costEur: 0,
@@ -116,7 +120,7 @@ describe('12D — Cycle nominal — transitions d\'état', () => {
     updated.steps[stepIdx].status = 'completed'
     updated.steps[stepIdx].costEur = stepCost
     updated.totalCost += stepCost
-    if (updated.currentStep < 8) {
+    if (updated.currentStep < TOTAL_PIPELINE_STEPS) {
       updated.currentStep++
     } else {
       updated.status = 'completed'
@@ -126,7 +130,7 @@ describe('12D — Cycle nominal — transitions d\'état', () => {
 
   function progressPct(run: SimulatedRun): number {
     const done = run.steps.filter((s) => s.status === 'completed').length
-    return Math.round((done / 8) * 100)
+    return Math.round((done / TOTAL_PIPELINE_STEPS) * 100)
   }
 
   it('état initial : pending, step 1, 0% progress, coût 0', () => {
@@ -137,16 +141,16 @@ describe('12D — Cycle nominal — transitions d\'état', () => {
     expect(run.totalCost).toBe(0)
   })
 
-  it('après step 1 : status=running, 13% progress', () => {
+  it('après step 1 : status=running, 11% progress', () => {
     let run = createRun('nominal-2')
     run = executeStep(run)
     expect(run.status).toBe('running')
-    expect(progressPct(run)).toBe(13)
+    expect(progressPct(run)).toBe(11)
   })
 
   it('run complet : status=completed, 100% progress', () => {
     let run = createRun('nominal-3')
-    for (let i = 0; i < 8; i++) run = executeStep(run)
+    for (let i = 0; i < TOTAL_PIPELINE_STEPS; i++) run = executeStep(run)
     expect(run.status).toBe('completed')
     expect(progressPct(run)).toBe(100)
     expect(run.steps.every((s) => s.status === 'completed')).toBe(true)
@@ -160,7 +164,7 @@ describe('12D — Cycle nominal — transitions d\'état', () => {
 
   it('run completed absent de la queue (filtre pending/running)', () => {
     let run = createRun('nominal-5')
-    for (let i = 0; i < 8; i++) run = executeStep(run)
+    for (let i = 0; i < TOTAL_PIPELINE_STEPS; i++) run = executeStep(run)
     const QUEUE_STATUSES = ['pending', 'running']
     expect(QUEUE_STATUSES.includes(run.status)).toBe(false)
   })
@@ -192,7 +196,7 @@ describe('12D — Run lent mais sain — heartbeat protège du faux zombie', () 
   })
 
   it('step de 10min avec heartbeat régulier 60s : pas zombie à mi-course', () => {
-    // Step 6 (génération) dure 10min, heartbeat à T+540s, interrogation à T+550s
+    // Step 7 (génération) dure 10min, heartbeat à T+540s, interrogation à T+550s
     const startTime = Date.now() - 550_000
     const lastHeartbeat = new Date(startTime + 540_000)
     expect(isZombie(lastHeartbeat)).toBe(false)
@@ -265,12 +269,12 @@ describe('12D — Scénario kill — état final cohérent', () => {
   })
 
   it('progressPct d\'un run killed = steps complétés avant le kill', () => {
-    // Kill après step 3 → steps 1+2 complétés → 25%
-    const steps = Array.from({ length: 8 }, (_, i) => ({
+    // Kill après step 3 → steps 1+2 complétés → 22%
+    const steps = Array.from({ length: TOTAL_PIPELINE_STEPS }, (_, i) => ({
       status: i < 2 ? 'completed' : 'pending',
     }))
-    const pct = Math.round(steps.filter((s) => s.status === 'completed').length / 8 * 100)
-    expect(pct).toBe(25)
+    const pct = Math.round(steps.filter((s) => s.status === 'completed').length / TOTAL_PIPELINE_STEPS * 100)
+    expect(pct).toBe(22)
   })
 })
 
@@ -284,7 +288,7 @@ describe('12D — Scénario échec step — traçabilité', () => {
   }
 
   function simulateFailAt(failStep: number): { runStatus: string; steps: StepResult[] } {
-    const steps: StepResult[] = Array.from({ length: 8 }, (_, i) => {
+    const steps: StepResult[] = Array.from({ length: TOTAL_PIPELINE_STEPS }, (_, i) => {
       const n = i + 1
       if (n < failStep) return { stepNumber: n, status: 'completed', error: null }
       if (n === failStep) return { stepNumber: n, status: 'failed', error: 'Provider timeout' }
@@ -309,7 +313,7 @@ describe('12D — Scénario échec step — traçabilité', () => {
 
   it('steps après l\'échec restent pending (pas exécutés)', () => {
     const r = simulateFailAt(3)
-    for (let i = 3; i < 8; i++) {
+    for (let i = 3; i < TOTAL_PIPELINE_STEPS; i++) {
       expect(r.steps[i].status).toBe('pending')
       expect(r.steps[i].error).toBeNull()
     }
@@ -322,8 +326,8 @@ describe('12D — Scénario échec step — traçabilité', () => {
 
   it('progressPct run failed = steps complétés avant l\'échec', () => {
     const r = simulateFailAt(5) // 4 steps complétés, step 5 failed
-    const pct = Math.round(r.steps.filter((s) => s.status === 'completed').length / 8 * 100)
-    expect(pct).toBe(50) // 4/8 = 50%
+    const pct = Math.round(r.steps.filter((s) => s.status === 'completed').length / TOTAL_PIPELINE_STEPS * 100)
+    expect(pct).toBe(44) // 4/9 = 44%
   })
 })
 
@@ -331,8 +335,8 @@ describe('12D — Scénario échec step — traçabilité', () => {
 
 describe('12D — Idempotence des contrôles superviseur', () => {
   it('GET /api/runs/{id}/progress sur run completed retourne 100%', () => {
-    const steps = Array.from({ length: 8 }, (_, i) => ({ status: 'completed' }))
-    const pct = Math.round(steps.filter((s) => s.status === 'completed').length / 8 * 100)
+    const steps = Array.from({ length: TOTAL_PIPELINE_STEPS }, (_, i) => ({ status: 'completed' }))
+    const pct = Math.round(steps.filter((s) => s.status === 'completed').length / TOTAL_PIPELINE_STEPS * 100)
     expect(pct).toBe(100)
   })
 
@@ -340,10 +344,10 @@ describe('12D — Idempotence des contrôles superviseur', () => {
     // Le progressPct d'un run terminé ne change plus — résultat stable
     const failedAt3 = { steps: [
       { status: 'completed' }, { status: 'completed' },
-      { status: 'failed' }, ...Array(5).fill({ status: 'pending' }),
+      { status: 'failed' }, ...Array(TOTAL_PIPELINE_STEPS - 3).fill({ status: 'pending' }),
     ]}
-    const pct = Math.round(failedAt3.steps.filter((s) => s.status === 'completed').length / 8 * 100)
-    expect(pct).toBe(25) // 2/8
+    const pct = Math.round(failedAt3.steps.filter((s) => s.status === 'completed').length / TOTAL_PIPELINE_STEPS * 100)
+    expect(pct).toBe(22) // 2/9
   })
 
   it('POST /api/runs/recovery idempotent : 0 zombie → recovered=0', () => {
@@ -442,7 +446,7 @@ describe('12D — Cohérence transverse 12A + 12B + 12C', () => {
 // ─── 8. Budget temps visible — preuve de lisibilité ──────────────────────────
 
 describe('12D — Budget temps — preuve de lisibilité', () => {
-  it('les 8 budgets steps sont définis et positifs', () => {
+  it('les 9 budgets steps sont définis et positifs', () => {
     const budgets = Object.values(STEP_BUDGETS_MS)
     for (const b of budgets) {
       expect(typeof b).toBe('number')
@@ -450,13 +454,13 @@ describe('12D — Budget temps — preuve de lisibilité', () => {
     }
   })
 
-  it('budget step 6 (génération) > budget step 1-5 (LLM texte)', () => {
-    expect(STEP_BUDGETS_MS.step6_generation).toBeGreaterThan(STEP_BUDGETS_MS.step1_idea)
-    expect(STEP_BUDGETS_MS.step6_generation).toBeGreaterThan(STEP_BUDGETS_MS.step5_prompts)
+  it('budget step 7 (génération) > budget steps texte', () => {
+    expect(STEP_BUDGETS_MS.step7_generation).toBeGreaterThan(STEP_BUDGETS_MS.step1_idea)
+    expect(STEP_BUDGETS_MS.step7_generation).toBeGreaterThan(STEP_BUDGETS_MS.step6_prompts)
   })
 
-  it('budget step 8 (publish) < step 6 (génération)', () => {
-    expect(STEP_BUDGETS_MS.step8_publish).toBeLessThan(STEP_BUDGETS_MS.step6_generation)
+  it('budget step 9 (publish) < step 7 (génération)', () => {
+    expect(STEP_BUDGETS_MS.step9_publish).toBeLessThan(STEP_BUDGETS_MS.step7_generation)
   })
 
   it('elapsedMs d\'un run est mesurable comme durée concrète', () => {

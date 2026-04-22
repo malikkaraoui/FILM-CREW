@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { RunProgress, StepProgress, QueueState, RunSummary } from '@/lib/observability/observability-types'
+import { TOTAL_PIPELINE_STEPS } from '@/lib/pipeline/constants'
 
 /**
  * 12A — Observabilité + queueing
@@ -24,29 +25,29 @@ describe('12A — Observabilité + queueing', () => {
       const progress: RunProgress = {
         runId: 'run-test',
         status: 'running',
-        currentStep: 3,
-        totalSteps: 8,
+        currentStep: 4,
+        totalSteps: TOTAL_PIPELINE_STEPS,
         progressPct: 25,
         elapsedMs: 45_000,
         totalCostEur: 0.002,
         steps: [],
       }
       expect(progress.runId).toBeTruthy()
-      expect(progress.totalSteps).toBe(8)
+      expect(progress.totalSteps).toBe(TOTAL_PIPELINE_STEPS)
       expect(progress.progressPct).toBeGreaterThanOrEqual(0)
       expect(progress.progressPct).toBeLessThanOrEqual(100)
     })
 
-    it('totalSteps = 8 (pipeline FILM CREW)', () => {
+    it('totalSteps = 9 (pipeline FILM CREW)', () => {
       const progress: RunProgress = {
         runId: 'r', status: 'pending', currentStep: null,
-        totalSteps: 8, progressPct: 0, elapsedMs: 0, totalCostEur: 0, steps: [],
+        totalSteps: TOTAL_PIPELINE_STEPS, progressPct: 0, elapsedMs: 0, totalCostEur: 0, steps: [],
       }
-      expect(progress.totalSteps).toBe(8)
+      expect(progress.totalSteps).toBe(TOTAL_PIPELINE_STEPS)
     })
 
     it('status completed → progressPct = 100', () => {
-      const completedSteps: StepProgress[] = Array.from({ length: 8 }, (_, i) => ({
+      const completedSteps: StepProgress[] = Array.from({ length: TOTAL_PIPELINE_STEPS }, (_, i) => ({
         stepNumber: i + 1,
         stepName: `Step ${i + 1}`,
         status: 'completed',
@@ -57,7 +58,7 @@ describe('12A — Observabilité + queueing', () => {
         error: null,
       }))
       const completedCount = completedSteps.filter((s) => s.status === 'completed').length
-      const pct = Math.round((completedCount / 8) * 100)
+      const pct = Math.round((completedCount / TOTAL_PIPELINE_STEPS) * 100)
       expect(pct).toBe(100)
     })
   })
@@ -101,7 +102,7 @@ describe('12A — Observabilité + queueing', () => {
 
     it('error présente si step a échoué', () => {
       const step: StepProgress = {
-        stepNumber: 6, stepName: 'Génération', status: 'failed',
+        stepNumber: 7, stepName: 'Génération', status: 'failed',
         costEur: 0, durationMs: 5000, startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(), error: 'No video provider available',
       }
@@ -158,7 +159,7 @@ describe('12A — Observabilité + queueing', () => {
 
   describe('RunSummary — structure', () => {
     it('type standard ou viral', () => {
-      const s1: RunSummary = { id: 'r', idea: 'i', type: 'standard', status: 'completed', currentStep: 8, costEur: 0.01, createdAt: new Date().toISOString() }
+      const s1: RunSummary = { id: 'r', idea: 'i', type: 'standard', status: 'completed', currentStep: 9, costEur: 0.01, createdAt: new Date().toISOString() }
       const s2: RunSummary = { id: 'r', idea: 'i', type: 'viral', status: 'running', currentStep: 3, costEur: 0, createdAt: new Date().toISOString() }
       expect(s1.type).toBe('standard')
       expect(s2.type).toBe('viral')
@@ -173,7 +174,7 @@ describe('12A — Observabilité + queueing', () => {
   // ─── 5. progressPct — calcul précis ─────────────────────────────────────
 
   describe('progressPct — calcul', () => {
-    function calcPct(completedSteps: number, total = 8) {
+    function calcPct(completedSteps: number, total = TOTAL_PIPELINE_STEPS) {
       return Math.round((completedSteps / total) * 100)
     }
 
@@ -181,20 +182,20 @@ describe('12A — Observabilité + queueing', () => {
       expect(calcPct(0)).toBe(0)
     })
 
-    it('4 steps complétés sur 8 → 50%', () => {
-      expect(calcPct(4)).toBe(50)
+    it('4 steps complétés sur 9 → 44%', () => {
+      expect(calcPct(4)).toBe(44)
     })
 
-    it('8 steps complétés sur 8 → 100%', () => {
-      expect(calcPct(8)).toBe(100)
+    it('9 steps complétés sur 9 → 100%', () => {
+      expect(calcPct(9)).toBe(100)
     })
 
-    it('3 steps complétés → 37.5% → arrondi 38%', () => {
-      expect(calcPct(3)).toBe(38)
+    it('3 steps complétés → 33.3% → arrondi 33%', () => {
+      expect(calcPct(3)).toBe(33)
     })
 
-    it('1 step complété → 12.5% → arrondi 13%', () => {
-      expect(calcPct(1)).toBe(13)
+    it('1 step complété → 11.1% → arrondi 11%', () => {
+      expect(calcPct(1)).toBe(11)
     })
   })
 

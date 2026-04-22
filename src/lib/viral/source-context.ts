@@ -10,6 +10,29 @@ export type YouTubeSourceContext = {
   subtitleLanguage?: string
 }
 
+export type ViralLlmGrounding = {
+  topicAnchor: string
+  transcriptForLlm: string
+  removedPromotionalLines: string[]
+  totalLines: number
+  keptLinesCount: number
+}
+
+const PROMOTIONAL_PATTERNS = [
+  /\b(sponsor|sponsoris|sponsorise|sponsored|partenariat|partenaire)\b/i,
+  /\b(code promo|promo code|remise|reduction|offre|offert|gratuit|essai gratuit)\b/i,
+  /\b(abonnez-vous|abonne toi|subscribe|like and subscribe|cloche|pouce bleu)\b/i,
+  /\b(lien en bio|link in bio|description ci-dessous|description below)\b/i,
+  /\b(publicite|advertisement|advertising|ad break|pre-roll|mid-roll)\b/i,
+  /https?:\/\//i,
+  /\b(www\.|\.com\b|\.fr\b|\.io\b)\b/i,
+]
+
+const TITLE_STOPWORDS = new Set([
+  'avec', 'dans', 'pour', 'sans', 'chez', 'tout', 'tous', 'toute', 'toutes', 'plus', 'moins', 'mais', 'donc',
+  'une', 'des', 'les', 'sur', 'sous', 'auto', 'emission', 'émission', 'video', 'vidéo', 'officiel', 'official',
+])
+
 function uniqueLines(lines: string[]): string[] {
   const seen = new Set<string>()
   const output: string[] = []
@@ -82,6 +105,73 @@ export function buildMetadataOnlyTranscript(info: Record<string, unknown>): stri
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+function normalizeKeyword(input: string): string {
+  return input
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function extractTopicKeywords(text: string): string[] {
+  return Array.from(new Set(
+    text
+      .split(/[^\p{L}\p{N}]+/u)
+      .map((word) => normalizeKeyword(word))
+      .filter((word) => word.length >= 4)
+      .filter((word) => !TITLE_STOPWORDS.has(word)),
+  ))
+}
+
+export function buildTopicAnchor(context: Pick<YouTubeSourceContext, 'title' | 'description' | 'channel'>): string {
+  const descriptionSnippet = context.description
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean)
+
+  return [
+    context.title ? `Titre canonique: ${context.title}` : '',
+    context.channel ? `Chaîne: ${context.channel}` : '',
+    descriptionSnippet ? `Résumé description: ${descriptionSnippet.slice(0, 280)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export function sanitizeTranscriptForLlm(context: YouTubeSourceContext): ViralLlmGrounding {
+  const lines = context.transcript
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const topicKeywords = extractTopicKeywords(`${context.title} ${context.description} ${context.channel}`)
+  const removedPromotionalLines: string[] = []
+  const keptLines: string[] = []
+
+  for (const line of lines) {
+    const normalizedLine = normalizeKeyword(line)
+    const matchesPromoPattern = PROMOTIONAL_PATTERNS.some((pattern) => pattern.test(line))
+    const sharesTopicKeyword = topicKeywords.length === 0
+      ? true
+      : topicKeywords.some((keyword) => normalizedLine.includes(keyword))
+
+    if (matchesPromoPattern && !sharesTopicKeyword) {
+      removedPromotionalLines.push(line)
+      continue
+    }
+
+    keptLines.push(line)
+  }
+
+  const transcriptForLlm = keptLines.join('\n').trim() || context.transcript
+  return {
+    topicAnchor: buildTopicAnchor(context),
+    transcriptForLlm,
+    removedPromotionalLines,
+    totalLines: lines.length,
+    keptLinesCount: keptLines.length,
+  }
 }
 
 export function buildYouTubeSourceContext(opts: {

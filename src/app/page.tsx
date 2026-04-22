@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import type { Chain } from '@/types/chain'
 import type { Run } from '@/types/run'
+import { formatPipelineStepLabel } from '@/lib/pipeline/constants'
 
 type ActiveRun = {
   id: string
@@ -91,12 +92,15 @@ export default function Dashboard() {
             <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                  Run en cours — Étape {queue.active.currentStep ?? '?'}/8
+                  Run en cours — {formatPipelineStepLabel(queue.active.currentStep)}
                 </CardTitle>
                 <CardDescription className="mt-0.5 truncate text-xs">
                   {queue.active.idea}
-                  {activeRunFull && chainMap[activeRunFull.chainId] && (
+                  {activeRunFull?.chainId && chainMap[activeRunFull.chainId] && (
                     <span className="ml-1 text-muted-foreground">· {chainMap[activeRunFull.chainId].name}</span>
+                  )}
+                  {activeRunFull && !activeRunFull.chainId && (
+                    <span className="ml-1 text-muted-foreground">· sans chaîne</span>
                   )}
                 </CardDescription>
               </div>
@@ -179,14 +183,17 @@ export default function Dashboard() {
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="truncate">{r.idea}</span>
-                  {chainMap[r.chainId] && (
+                  {r.chainId && chainMap[r.chainId] && (
                     <span className="shrink-0 text-xs text-muted-foreground">{chainMap[r.chainId].name}</span>
+                  )}
+                  {!r.chainId && (
+                    <span className="shrink-0 text-xs text-muted-foreground">Sans chaîne</span>
                   )}
                 </div>
                 <div className="ml-4 flex shrink-0 items-center gap-3">
                   <span className={`text-xs font-medium ${STATUS_CLASSES[r.status] ?? ''}`}>
                     {r.status === 'running' && r.currentStep
-                      ? `Étape ${r.currentStep}/8`
+                      ? formatPipelineStepLabel(r.currentStep)
                       : (STATUS_LABELS[r.status] ?? r.status)}
                   </span>
                   <span className="font-mono text-xs text-muted-foreground">{(r.costEur ?? 0).toFixed(2)} €</span>

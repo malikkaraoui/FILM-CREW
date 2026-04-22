@@ -1,6 +1,6 @@
 export type Run = {
   id: string
-  chainId: string
+  chainId: string | null
   type: string
   idea: string
   template: string | null

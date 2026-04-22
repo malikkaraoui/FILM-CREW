@@ -64,12 +64,43 @@ export type ViralSessionStatus = {
   error?: string
 }
 
+export type ViralShortExportStatus = 'queued' | 'processing' | 'completed' | 'error'
+
+export type ViralSubtitleStyle = {
+  fontSize: number
+  fontFamily: string
+  color: string
+  maxCharsPerLine: number
+  maxLines: number
+}
+
+export type ViralShortExport = {
+  segmentIndex: number
+  title: string
+  start_s: number
+  end_s: number
+  crop916: boolean
+  burnSubtitles: boolean
+  subtitleStyle?: ViralSubtitleStyle
+  status: ViralShortExportStatus
+  outputFilePath: string | null
+  sourceUrl: string | null
+  subtitlesAvailable: boolean
+  error?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ViralShortExportManifest = {
+  exports: ViralShortExport[]
+}
+
 /** Résultat de la création d'un run depuis un segment */
 export type CreateRunFromSegmentResult = {
   runId: string
   viralId: string
   segmentIndex: number
   idea: string
-  chainId: string
+  chainId: string | null
   createdAt: string
 }

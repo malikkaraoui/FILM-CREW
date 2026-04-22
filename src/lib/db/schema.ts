@@ -21,7 +21,7 @@ export const publicationAccount = pgTable('publication_account', {
 
 export const run = pgTable('run', {
   id: text('id').primaryKey(),
-  chainId: text('chain_id').notNull().references(() => chain.id),
+  chainId: text('chain_id').references(() => chain.id),
   type: text('type').notNull().default('standard'), // 'standard' | 'viral'
   idea: text('idea').notNull(),
   template: text('template'),

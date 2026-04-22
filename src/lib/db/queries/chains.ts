@@ -6,7 +6,8 @@ export async function getChains() {
   return db.select().from(chain).orderBy(chain.createdAt)
 }
 
-export async function getChainById(id: string) {
+export async function getChainById(id: string | null | undefined) {
+  if (!id) return null
   const rows = await db.select().from(chain).where(eq(chain.id, id))
   return rows[0] ?? null
 }
@@ -53,7 +54,8 @@ export async function duplicateChain(sourceId: string, newId: string, newName: s
 
 // Publication accounts
 
-export async function getPublicationAccounts(chainId: string) {
+export async function getPublicationAccounts(chainId: string | null | undefined) {
+  if (!chainId) return []
   return db.select().from(publicationAccount).where(eq(publicationAccount.chainId, chainId))
 }
 

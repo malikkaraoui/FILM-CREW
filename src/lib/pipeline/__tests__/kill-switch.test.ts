@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { TOTAL_PIPELINE_STEPS } from '../constants'
 
 /**
  * 12B — Contrôle d'exécution : kill switch + engine kill check
@@ -59,7 +60,7 @@ describe('12B — Engine kill check — logique d\'arrêt', () => {
   type StepCall = { stepNumber: number; killed: boolean }
 
   async function simulatePipeline(killAtStep: number | null): Promise<StepCall[]> {
-    const steps = [1, 2, 3, 4, 5, 6, 7, 8]
+    const steps = Array.from({ length: TOTAL_PIPELINE_STEPS }, (_, i) => i + 1)
     const executed: StepCall[] = []
 
     for (const stepNumber of steps) {
@@ -76,9 +77,9 @@ describe('12B — Engine kill check — logique d\'arrêt', () => {
     return executed
   }
 
-  it('sans kill : tous les 8 steps s\'exécutent', async () => {
+  it('sans kill : tous les 9 steps s\'exécutent', async () => {
     const result = await simulatePipeline(null)
-    expect(result).toHaveLength(8)
+    expect(result).toHaveLength(TOTAL_PIPELINE_STEPS)
     expect(result.every((s) => !s.killed)).toBe(true)
   })
 
@@ -98,12 +99,12 @@ describe('12B — Engine kill check — logique d\'arrêt', () => {
     expect(killed[0].stepNumber).toBe(3)
   })
 
-  it('kill avant step 8 : steps 1-7 exécutés, arrêt à 8', async () => {
-    const result = await simulatePipeline(8)
+  it('kill avant step 9 : steps 1-8 exécutés, arrêt à 9', async () => {
+    const result = await simulatePipeline(TOTAL_PIPELINE_STEPS)
     const executed = result.filter((s) => !s.killed)
-    expect(executed).toHaveLength(7)
-    expect(result[7].killed).toBe(true)
-    expect(result[7].stepNumber).toBe(8)
+    expect(executed).toHaveLength(TOTAL_PIPELINE_STEPS - 1)
+    expect(result[TOTAL_PIPELINE_STEPS - 1].killed).toBe(true)
+    expect(result[TOTAL_PIPELINE_STEPS - 1].stepNumber).toBe(TOTAL_PIPELINE_STEPS)
   })
 
   it('le kill prend effet à la prochaine frontière inter-step (pas mid-step)', async () => {

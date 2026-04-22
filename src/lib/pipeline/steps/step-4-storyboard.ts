@@ -4,18 +4,16 @@ import {
   storyboardLocalProvider,
   buildLocalStoryboardPrompt,
   composeStoryboardBoard,
+  mergeStoryboardPromptWithCloudPlan,
 } from '@/lib/providers/image/storyboard-local'
 import { logger } from '@/lib/logger'
+import { queueStoryboardCloudBatchGeneration } from '@/lib/storyboard/cloud-plan'
 import type { PipelineStep, StepContext, StepResult } from '../types'
-
-type Scene = {
-  index: number
-  description: string
-  dialogue: string
-  camera: string
-  lighting: string
-  duration_s: number
-}
+import {
+  getBlueprintScene,
+  readStoryboardBlueprint,
+  type StructuredStoryDocument,
+} from '@/lib/storyboard/blueprint'
 
 type StoryboardImage = {
   sceneIndex: number
@@ -26,18 +24,25 @@ type StoryboardImage = {
   providerUsed?: string | null
   failoverOccurred?: boolean
   isPlaceholder?: boolean
+  cloudPlanStatus?: 'queued' | 'ready' | 'failed' | null
+  cloudPlanModel?: string | null
+  cloudPlanMode?: string | null
+  cloudPlanFilePath?: string | null
+  cloudPlanRequestedAt?: string | null
+  cloudPlanCompletedAt?: string | null
+  cloudPlanError?: string | null
 }
 
 export const step4Storyboard: PipelineStep = {
   name: 'Storyboard',
-  stepNumber: 4,
+  stepNumber: 5,
 
   async execute(ctx: StepContext): Promise<StepResult> {
     // Lire la structure JSON de l'étape précédente
-    let structure: { scenes: Scene[] }
+    let structure: StructuredStoryDocument
     try {
       const raw = await readFile(join(ctx.storagePath, 'structure.json'), 'utf-8')
-      structure = JSON.parse(raw)
+      structure = JSON.parse(raw) as StructuredStoryDocument
     } catch {
       return {
         success: false,
@@ -47,11 +52,13 @@ export const step4Storyboard: PipelineStep = {
       }
     }
 
+    const blueprint = await readStoryboardBlueprint(ctx.storagePath)
+
     const images: StoryboardImage[] = []
     let totalCost = 0
 
     for (const scene of structure.scenes) {
-      const prompt = buildLocalStoryboardPrompt({
+      const basePrompt = buildLocalStoryboardPrompt({
         sceneIndex: scene.index,
         description: scene.description,
         lighting: scene.lighting,
@@ -59,6 +66,10 @@ export const step4Storyboard: PipelineStep = {
         durationS: scene.duration_s,
         dialogue: scene.dialogue,
       })
+      const blueprintScene = getBlueprintScene(blueprint, scene.index)
+      const prompt = blueprintScene
+        ? mergeStoryboardPromptWithCloudPlan(basePrompt, blueprintScene)
+        : basePrompt
 
       try {
         const storyboardDir = join(ctx.storagePath, 'storyboard')
@@ -73,7 +84,7 @@ export const step4Storyboard: PipelineStep = {
 
         images.push({
           sceneIndex: scene.index,
-          description: scene.description,
+          description: blueprintScene?.childCaption || scene.description,
           prompt,
           filePath: result.filePath,
           status: 'generated',
@@ -95,7 +106,7 @@ export const step4Storyboard: PipelineStep = {
 
         images.push({
           sceneIndex: scene.index,
-          description: scene.description,
+          description: blueprintScene?.childCaption || scene.description,
           prompt,
           filePath: placeholderPath,
           status: 'pending',
@@ -132,6 +143,25 @@ export const step4Storyboard: PipelineStep = {
       JSON.stringify(manifest, null, 2),
     )
 
+    const cloudPlanJob = await queueStoryboardCloudBatchGeneration({
+      runId: ctx.runId,
+      storagePath: ctx.storagePath,
+      scenes: images.map((image) => {
+        const scene = structure.scenes.find((entry) => entry.index === image.sceneIndex)
+        return {
+          runId: ctx.runId,
+          storagePath: ctx.storagePath,
+          sceneIndex: image.sceneIndex,
+          description: scene?.description || image.description,
+          prompt: image.prompt,
+          camera: scene?.camera,
+          lighting: getBlueprintScene(blueprint, image.sceneIndex)?.lighting || scene?.lighting,
+          durationS: scene?.duration_s,
+          blueprint: getBlueprintScene(blueprint, image.sceneIndex),
+        }
+      }),
+    })
+
     const realGenerated = images.filter((img) => img.status === 'generated' && !img.isPlaceholder)
     const placeholderCount = images.filter((img) => img.isPlaceholder).length
     const allGenerated = images.every((img) => img.status === 'generated' && !img.isPlaceholder)
@@ -146,6 +176,11 @@ export const step4Storyboard: PipelineStep = {
         allGenerated,
         boardFilePath,
         boardLayout,
+        blueprintUsed: Boolean(blueprint?.scenes.length),
+        cloudPlanQueued: cloudPlanJob.queued,
+        cloudPlanModel: cloudPlanJob.model ?? null,
+        cloudPlanMode: cloudPlanJob.mode ?? null,
+        cloudPlanSceneCount: cloudPlanJob.sceneCount,
       },
     }
   },

@@ -1,17 +1,7 @@
 import { db } from '../connection'
 import { run, runStep } from '../schema'
 import { eq, desc, or, inArray, and, lt, isNull } from 'drizzle-orm'
-
-const STEP_NAMES = [
-  'Idée',
-  'Brainstorm',
-  'JSON structuré',
-  'Storyboard',
-  'Prompts Seedance',
-  'Génération',
-  'Preview',
-  'Publication',
-]
+import { PIPELINE_STEP_NAMES } from '@/lib/pipeline/constants'
 
 export async function getRuns() {
   return db.select().from(run).orderBy(desc(run.createdAt))
@@ -35,24 +25,25 @@ export async function getActiveRun() {
 
 export async function createRun(data: {
   id: string
-  chainId: string
+  chainId?: string | null
   type?: string
   idea: string
   template?: string
 }) {
   const [row] = await db.insert(run).values({
     ...data,
+    chainId: data.chainId ?? null,
     type: data.type || 'standard',
     status: 'pending',
   }).returning()
 
-  // Créer les 8 étapes
-  for (let i = 0; i < STEP_NAMES.length; i++) {
+  // Créer les étapes canoniques du pipeline
+  for (let i = 0; i < PIPELINE_STEP_NAMES.length; i++) {
     await db.insert(runStep).values({
       id: crypto.randomUUID(),
       runId: data.id,
       stepNumber: i + 1,
-      stepName: STEP_NAMES[i],
+      stepName: PIPELINE_STEP_NAMES[i],
       status: 'pending',
     })
   }

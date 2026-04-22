@@ -152,7 +152,7 @@ export const SERVICES_METADATA: Record<string, ServiceMetadata> = {
     status: 'active',
     dashboardUrl: 'http://localhost:11434/api/tags',
     description: 'Modeles LLM locaux (mistral, qwen, deepseek)',
-    notes: 'UP et operationnel - 6 modeles disponibles',
+    notes: 'UP et operationnel - supporte aussi un plan storyboard cloud via modele cloud ou API directe si configure',
   },
   'storyboard-local': {
     name: 'Storyboard Local Rough',

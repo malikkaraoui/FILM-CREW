@@ -99,7 +99,19 @@ Retourne UNIQUEMENT le JSON.`,
 
       // Collecter les artefacts réels
       const artifacts: { name: string; content: string }[] = []
-      const textFiles = ['brief.json', 'structure.json', 'structure-raw.txt', 'prompts.json', 'generation-manifest.json', 'preview-manifest.json']
+      const textFiles = [
+        'brief.json',
+        'structure.json',
+        'structure-raw.txt',
+        'director-plan.json',
+        'storyboard-blueprint.json',
+        'storyboard-blueprint-raw.txt',
+        'prompts.json',
+        'prompt-manifest.json',
+        'generation-manifest.json',
+        'preview-manifest.json',
+        'publish-manifest.json',
+      ]
       for (const name of textFiles) {
         try {
           artifacts.push({ name, content: await readFile(join(storagePath, name), 'utf-8') })

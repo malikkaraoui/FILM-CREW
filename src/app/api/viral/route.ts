@@ -9,6 +9,7 @@ import { createViralStatus, updateViralStatus } from '@/lib/viral/status'
 import { parseViralSegmentsFromLlm } from '@/lib/viral/segment-parser'
 import {
   buildYouTubeSourceContext,
+  sanitizeTranscriptForLlm,
   parseVttToTranscript,
   selectPreferredSubtitleLanguage,
 } from '@/lib/viral/source-context'
@@ -111,9 +112,27 @@ async function processViralSession(id: string, url: string, instruction?: string
       transcript: transcriptText,
       subtitleLanguage,
     })
+    const llmGrounding = sanitizeTranscriptForLlm(sourceContext)
 
     const transcriptPath = join(viralDir, 'transcript.txt')
     await writeFile(transcriptPath, sourceContext.transcript)
+    await writeFile(
+      join(viralDir, 'llm-input.json'),
+      JSON.stringify({
+        url,
+        instruction: instruction ?? null,
+        transcriptSource: sourceContext.transcriptSource,
+        subtitleLanguage: sourceContext.subtitleLanguage ?? null,
+        title: sourceContext.title,
+        channel: sourceContext.channel,
+        durationSeconds: sourceContext.durationSeconds ?? null,
+        topicAnchor: llmGrounding.topicAnchor,
+        totalLines: llmGrounding.totalLines,
+        keptLinesCount: llmGrounding.keptLinesCount,
+        removedPromotionalLines: llmGrounding.removedPromotionalLines,
+        transcriptForLlm: llmGrounding.transcriptForLlm,
+      }, null, 2),
+    )
 
     await updateViralStatus(id, {
       state: 'running',
@@ -123,7 +142,11 @@ async function processViralSession(id: string, url: string, instruction?: string
         ? 'Sous-titres YouTube récupérés pour l’analyse'
         : 'Aucun sous-titre récupéré — fallback sur les métadonnées YouTube',
       details: sourceContext.transcriptSource === 'youtube-subtitles'
-        ? `Langue détectée : ${sourceContext.subtitleLanguage ?? 'inconnue'}`
+        ? [
+            `Sous-titres détectés : ${sourceContext.subtitleLanguage ?? 'inconnue'}`,
+            `Lignes conservées : ${llmGrounding.keptLinesCount}`,
+            `Lignes promo écartées : ${llmGrounding.removedPromotionalLines.length}`,
+          ].join('\n')
         : 'Analyse bridée aux métadonnées ; pas d’invention autorisée hors contexte',
     })
 
@@ -133,7 +156,7 @@ async function processViralSession(id: string, url: string, instruction?: string
       scope: 'local',
       message: 'Analyse des segments viraux',
       details: sourceContext.transcriptSource === 'youtube-subtitles'
-        ? 'LLM appelé sur les sous-titres YouTube + métadonnées'
+        ? 'LLM appelé sur les sous-titres YouTube filtrés + métadonnées + titre canonique'
         : 'LLM appelé uniquement sur les métadonnées YouTube, avec consigne anti-hallucination',
     })
 
@@ -155,6 +178,8 @@ Interdictions absolues :
 - si le contexte est insuffisant ou douteux, retourner un tableau segments vide.
 
 Objectif : proposer 3-5 segments de 30 à 60 secondes maximum qui feraient de bons shorts TikTok/Reels.
+Le TITRE et la CHAÎNE sont l'ancre canonique du sujet.
+Si des lignes ressemblent à de la promo, du sponsor, un CTA ou un hors-sujet sans rapport avec ce titre, ignore-les.
 ${instruction ? `Consigne spéciale : ${instruction}` : ''}
 Retourne un JSON :
 {
@@ -179,13 +204,18 @@ Chaîne : ${sourceContext.channel || 'inconnue'}
 Durée : ${sourceContext.durationSeconds ?? 'inconnue'} secondes
 Source de transcription : ${sourceContext.transcriptSource}${sourceContext.subtitleLanguage ? ` (${sourceContext.subtitleLanguage})` : ''}
 
+Ancre canonique du sujet :
+${llmGrounding.topicAnchor}
+
+Lignes promo / CTA filtrées avant analyse : ${llmGrounding.removedPromotionalLines.length}
+
 Contexte à analyser :
-${sourceContext.transcript}
+${llmGrounding.transcriptForLlm}
 
 Analyse et propose les meilleurs segments sans rien inventer. Si le contexte n'est pas assez fiable, retourne {"segments": []}.`,
             },
           ],
-          { temperature: 0.7, maxTokens: 1500 },
+          { temperature: 0.2, maxTokens: 1500 },
         )
       },
     )

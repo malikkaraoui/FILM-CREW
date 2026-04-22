@@ -7,12 +7,12 @@ describe('Agent Profiles', () => {
   })
 
   it('respecte la parité 3H/3F', () => {
-    // Mia (F), Lenny (H), Laura (F), Naël (H), Emilie (F), Nico (H)
+    // Mia (F), Lenny (H), Laura (F), Nael (H), Emilie (F), Nico (H)
     const names = Object.values(AGENT_PROFILES).map((p) => p.displayName)
     expect(names).toContain('Mia')
     expect(names).toContain('Lenny')
     expect(names).toContain('Laura')
-    expect(names).toContain('Naël')
+    expect(names).toContain('Nael')
     expect(names).toContain('Emilie')
     expect(names).toContain('Nico')
   })

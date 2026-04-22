@@ -8,13 +8,14 @@ import { eq, and } from 'drizzle-orm'
 import { existsSync } from 'fs'
 import { loadTemplate } from '@/lib/templates/loader'
 import type { StepContext, PipelineStep } from './types'
+import { FINAL_PIPELINE_STEP } from './constants'
 
 // Import des étapes
 import { step1Idea } from './steps/step-1-idea'
 import { step2Brainstorm } from './steps/step-2-brainstorm'
 import { step3Json } from './steps/step-3-json'
+import { step4VisualBlueprint } from './steps/step-4-visual-blueprint'
 import { step4Storyboard } from './steps/step-4-storyboard'
-import { step4bSketch } from './steps/step-4b-sketch'
 import { step5Prompts } from './steps/step-5-prompts'
 import { step6Generation } from './steps/step-6-generation'
 import { step7Preview } from './steps/step-7-preview'
@@ -24,8 +25,8 @@ const STEPS: PipelineStep[] = [
   step1Idea,
   step2Brainstorm,
   step3Json,
+  step4VisualBlueprint,
   step4Storyboard,
-  step4bSketch,
   step5Prompts,
   step6Generation,
   step7Preview,
@@ -40,8 +41,8 @@ export async function executePipeline(runId: string): Promise<void> {
   const run = await getRunById(runId)
   if (!run) throw new Error(`Run ${runId} introuvable`)
 
-  const chain = await getChainById(run.chainId)
-  if (!chain) throw new Error(`Chaîne ${run.chainId} introuvable`)
+  const chain = run.chainId ? await getChainById(run.chainId) : null
+  if (run.chainId && !chain) throw new Error(`Chaîne ${run.chainId} introuvable`)
 
   const storagePath = join(process.cwd(), 'storage', 'runs', runId)
   const intentionPath = existsSync(join(storagePath, 'intention.json'))
@@ -58,7 +59,7 @@ export async function executePipeline(runId: string): Promise<void> {
     runId,
     chainId: run.chainId,
     idea: run.idea,
-    brandKitPath: chain.brandKitPath,
+    brandKitPath: chain?.brandKitPath ?? null,
     storagePath,
     intentionPath,
     template,
@@ -128,7 +129,7 @@ export async function executePipeline(runId: string): Promise<void> {
     }
   }
 
-  await updateRunStatus(runId, 'completed', 8)
+  await updateRunStatus(runId, 'completed', FINAL_PIPELINE_STEP)
   logger.info({ event: 'pipeline_complete', runId, totalCost })
 }
 

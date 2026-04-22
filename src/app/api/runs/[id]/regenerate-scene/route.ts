@@ -9,9 +9,12 @@ import {
   storyboardLocalProvider,
   buildLocalStoryboardPrompt,
   composeStoryboardBoard,
+  mergeStoryboardPromptWithCloudPlan,
 } from '@/lib/providers/image/storyboard-local'
+import { queueStoryboardCloudPlanGeneration } from '@/lib/storyboard/cloud-plan'
 import type { VideoProvider } from '@/lib/providers/types'
 import { logger } from '@/lib/logger'
+import { getBlueprintScene, readStoryboardBlueprint } from '@/lib/storyboard/blueprint'
 
 /**
  * POST /api/runs/[id]/regenerate-scene
@@ -73,7 +76,7 @@ async function regenerateStoryboardScene(
   // Lire le manifest storyboard pour trouver la scène et son prompt
   const manifestPath = join(storagePath, 'storyboard', 'manifest.json')
   let manifest: {
-    images: { sceneIndex: number; description: string; prompt?: string; filePath: string; status: string; providerUsed?: string | null; failoverOccurred?: boolean; isPlaceholder?: boolean }[]
+    images: { sceneIndex: number; description: string; prompt?: string; filePath: string; status: string; providerUsed?: string | null; failoverOccurred?: boolean; isPlaceholder?: boolean; cloudPlanStatus?: 'queued' | 'ready' | 'failed' | null; cloudPlanModel?: string | null; cloudPlanMode?: string | null; cloudPlanFilePath?: string | null; cloudPlanRequestedAt?: string | null; cloudPlanCompletedAt?: string | null; cloudPlanError?: string | null }[]
     boardFilePath?: string | null
     boardLayout?: string | null
   }
@@ -120,8 +123,11 @@ async function regenerateStoryboardScene(
     structureScene = null
   }
 
+  const blueprint = await readStoryboardBlueprint(storagePath)
+  const blueprintScene = getBlueprintScene(blueprint, sceneIndex)
+
   const rawPrompt = customPrompt?.trim() || image.prompt || image.description
-  const prompt = /(^|\n)(Scene|Description|Lighting|Camera):/i.test(rawPrompt)
+  const basePrompt = /(^|\n)(Scene|Description|Lighting|Camera):/i.test(rawPrompt)
     ? rawPrompt
     : buildLocalStoryboardPrompt({
         sceneIndex,
@@ -131,7 +137,13 @@ async function regenerateStoryboardScene(
         durationS: structureScene?.duration_s,
         dialogue: structureScene?.dialogue,
       })
+  const prompt = blueprintScene
+    ? mergeStoryboardPromptWithCloudPlan(basePrompt, blueprintScene)
+    : basePrompt
   image.prompt = prompt
+  if (blueprintScene?.childCaption) {
+    image.description = blueprintScene.childCaption
+  }
 
   const storyboardDir = join(storagePath, 'storyboard')
   await mkdir(storyboardDir, { recursive: true })
@@ -141,6 +153,7 @@ async function regenerateStoryboardScene(
   let failoverChain: { original: string; fallback: string; reason: string } | undefined
   let artefactPath: string | null = null
   let regenerationError: string | null = null
+  let cloudPlanJob: { queued: boolean; sceneCount: number; model?: string; mode?: string } = { queued: false, sceneCount: 0 }
 
   try {
     const result = await storyboardLocalProvider.generate(
@@ -166,6 +179,18 @@ async function regenerateStoryboardScene(
     manifest.boardFilePath = board.filePath
     manifest.boardLayout = `${board.columns}x${board.rows}`
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+
+    cloudPlanJob = await queueStoryboardCloudPlanGeneration({
+      runId,
+      storagePath,
+      sceneIndex,
+      description: structureScene?.description || image.description,
+      prompt,
+      camera: structureScene?.camera,
+      lighting: blueprintScene?.lighting || structureScene?.lighting,
+      durationS: structureScene?.duration_s,
+      blueprint: blueprintScene,
+    })
 
     logger.info({
       event: 'regenerate_storyboard_success',
@@ -224,6 +249,9 @@ async function regenerateStoryboardScene(
       failoverChain,
       artefactPath,
       previousArtefactPath,
+      cloudPlanQueued: cloudPlanJob.queued,
+      cloudPlanModel: cloudPlanJob.model ?? null,
+      cloudPlanMode: cloudPlanJob.mode ?? null,
     },
   })
 }

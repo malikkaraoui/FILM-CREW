@@ -47,6 +47,7 @@ export type VideoOpts = {
   seed?: number
   audioRef?: string
   outputDir?: string
+  onProgress?: (event: VideoProgressEvent) => void | Promise<void>
 }
 
 export type VideoResult = {
@@ -54,6 +55,12 @@ export type VideoResult = {
   duration: number
   costEur: number
   seed?: number
+}
+
+export type VideoProgressEvent = {
+  step: string
+  message: string
+  details?: string
 }
 
 export type AudioResult = {
@@ -71,6 +78,9 @@ export type LLMOpts = {
   model?: string
   temperature?: number
   maxTokens?: number
+  host?: string
+  headers?: Record<string, string>
+  timeoutMs?: number
 }
 
 export type LLMResult = {

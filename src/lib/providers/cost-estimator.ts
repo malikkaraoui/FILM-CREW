@@ -9,6 +9,7 @@ const DEFAULT_COSTS: Record<string, Record<string, number>> = {
   llm: {
     'brainstorm': 0.02,       // ~2k tokens in/out
     'json-structure': 0.03,   // ~3k tokens
+    'visual-blueprint': 0.02, // ~2k tokens visuels structurés
     'prompts-seedance': 0.02, // ~2k tokens
   },
   image: {
@@ -33,7 +34,7 @@ export type CostEstimate = {
 }
 
 /**
- * Estime le coût d'un run standard (8 étapes) en EUR.
+ * Estime le coût d'un run standard (9 étapes) en EUR.
  * Utilise les providers enregistrés quand disponibles,
  * sinon retombe sur les tarifs par défaut.
  */
@@ -51,16 +52,20 @@ export async function estimateRunCost(): Promise<CostEstimate> {
   const jsonCost = await getProviderEstimate('llm', 'json-structure')
   breakdown.push({ step: 'JSON structuré', ...jsonCost })
 
-  // Étape 4 : Storyboard → Image (5 images)
+  // Étape 4 : Blueprint visuel → LLM
+  const blueprintCost = await getProviderEstimate('llm', 'visual-blueprint')
+  breakdown.push({ step: 'Blueprint visuel', ...blueprintCost })
+
+  // Étape 5 : Storyboard → Image (5 images)
   const imgCost = await getProviderEstimate('image', 'storyboard-image')
   const storyboardCost = imgCost.costEur * 5
   breakdown.push({ step: 'Storyboard', provider: imgCost.provider, costEur: storyboardCost, note: '~5 images' })
 
-  // Étape 5 : Prompts Seedance → LLM
+  // Étape 6 : Prompts Seedance → LLM
   const promptsCost = await getProviderEstimate('llm', 'prompts-seedance')
   breakdown.push({ step: 'Prompts Seedance', ...promptsCost })
 
-  // Étape 6 : Génération → Vidéo (6 clips) + TTS
+  // Étape 7 : Génération → Vidéo (6 clips) + TTS
   const videoCost = await getProviderEstimate('video', 'clip-10s')
   const totalVideoCost = videoCost.costEur * 6
   breakdown.push({ step: 'Génération vidéo', provider: videoCost.provider, costEur: totalVideoCost, note: '~6 clips x 10s' })
@@ -68,10 +73,10 @@ export async function estimateRunCost(): Promise<CostEstimate> {
   const ttsCost = await getProviderEstimate('tts', 'voix-1m30')
   breakdown.push({ step: 'Voix TTS', ...ttsCost })
 
-  // Étape 7 : Preview → gratuit (FFmpeg local)
+  // Étape 8 : Preview → gratuit (FFmpeg local)
   breakdown.push({ step: 'Preview', provider: 'FFmpeg', costEur: 0, note: 'Local' })
 
-  // Étape 8 : Publication → gratuit
+  // Étape 9 : Publication → gratuit
   breakdown.push({ step: 'Publication', provider: '-', costEur: 0, note: 'Export local' })
 
   const totalEur = breakdown.reduce((sum, b) => sum + b.costEur, 0)

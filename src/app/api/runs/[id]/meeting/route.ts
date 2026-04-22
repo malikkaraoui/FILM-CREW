@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { MeetingCoordinator } from '@/lib/agents/coordinator'
 import { getRunById } from '@/lib/db/queries/runs'
 import { getChainById } from '@/lib/db/queries/chains'
+import { getAgentTraces } from '@/lib/db/queries/traces'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { logger } from '@/lib/logger'
@@ -20,8 +21,22 @@ export async function POST(
       )
     }
 
+    const existingTraces = await getAgentTraces(id)
+    if (existingTraces.length > 0) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'MEETING_ALREADY_EXISTS',
+            message: 'Réunion déjà générée pour ce run — relance bloquée pour éviter les doublons d’agents.',
+          },
+          data: { tracesCount: existingTraces.length },
+        },
+        { status: 409 },
+      )
+    }
+
     // Charger le Brand Kit si disponible
-    const chain = await getChainById(run.chainId)
+    const chain = run.chainId ? await getChainById(run.chainId) : null
     let brandKit: string | null = null
     if (chain?.brandKitPath) {
       try {
