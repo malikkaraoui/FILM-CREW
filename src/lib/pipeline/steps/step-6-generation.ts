@@ -7,6 +7,7 @@ import type { VideoProvider, TTSProvider } from '@/lib/providers/types'
 import { logger } from '@/lib/logger'
 import type { PipelineStep, StepContext, StepResult } from '../types'
 import { readProjectConfig } from '@/lib/runs/project-config'
+import { pickBackgroundMusic } from '@/lib/providers/music/local-music'
 
 type PromptEntry = {
   sceneIndex: number
@@ -144,12 +145,28 @@ export const step6Generation: PipelineStep = {
       logger.warn({ event: 'tts_failed', runId: ctx.runId, error: (e as Error).message })
     }
 
+    // Sélection musique de fond
+    let musicPath: string | null = null
+    try {
+      const structure = JSON.parse(
+        await readFile(join(ctx.storagePath, 'structure.json'), 'utf-8'),
+      )
+      const tone = structure.tone ?? structure.style ?? undefined
+      musicPath = await pickBackgroundMusic(tone, ctx.runId)
+      if (musicPath) {
+        logger.info({ event: 'music_selected', runId: ctx.runId, path: musicPath, tone })
+      }
+    } catch (e) {
+      logger.warn({ event: 'music_selection_failed', runId: ctx.runId, error: (e as Error).message })
+    }
+
     // Sauvegarder le manifest de génération
     await writeFile(
       join(ctx.storagePath, 'generation-manifest.json'),
       JSON.stringify({
         clips: generatedClips,
         audioPath,
+        musicPath,
         generatedAt: new Date().toISOString(),
       }, null, 2),
     )
