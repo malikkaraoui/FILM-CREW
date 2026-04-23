@@ -13,6 +13,8 @@ import {
 } from '@/lib/runs/project-config'
 import { acquireMeetingLock, MeetingLockError } from '@/lib/runs/meeting-lock'
 import { getMeetingState } from '@/lib/agents/meeting-sequence'
+import { MEETING_EXPECTED_TRACE_COUNT, syncStep2MeetingState } from '@/lib/runs/meeting-sync'
+import { resetRunFromStep } from '@/lib/pipeline/reset'
 
 function getStoragePath(runId: string): string {
   return join(process.cwd(), 'storage', 'runs', runId)
@@ -52,6 +54,8 @@ export async function GET(
       )
     }
 
+    await syncStep2MeetingState(id)
+
     const storagePath = getStoragePath(id)
     const [traces, brief, projectConfig] = await Promise.all([
       getAgentTraces(id),
@@ -60,7 +64,7 @@ export async function GET(
     ])
 
     const durationMs = computeDurationMs(traces)
-    const meetingState = traces.length > 0 && traces.length < 19
+    const meetingState = traces.length > 0 && traces.length < MEETING_EXPECTED_TRACE_COUNT
       ? getMeetingState(traces.length)
       : null
 
@@ -106,18 +110,61 @@ export async function POST(
       meetingLlmMode?: 'local' | 'cloud'
       meetingLlmModel?: string
     }
+
+    if (run.status === 'running' && run.currentStep === 2) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'MEETING_ALREADY_RUNNING',
+            message: 'La réunion de l’étape 2 tourne déjà. Attends sa fin ou arrête le run en cours avant toute relance.',
+          },
+        },
+        { status: 409 },
+      )
+    }
+
     const storagePath = getStoragePath(id)
     releaseLock = await acquireMeetingLock(id, storagePath)
 
-    const existingTraces = await getAgentTraces(id)
+    const [existingTraces, existingBrief] = await Promise.all([
+      getAgentTraces(id),
+      readBriefFile(storagePath),
+    ])
+
+    if (existingBrief && body.force !== true) {
+      await syncStep2MeetingState(id)
+      return NextResponse.json(
+        {
+          error: {
+            code: 'MEETING_ALREADY_COMPLETED',
+            message: 'La réunion est déjà terminée. Valide l’étape 2 au lieu de la relancer.',
+          },
+          data: { tracesCount: existingTraces.length },
+        },
+        { status: 409 },
+      )
+    }
+
     if (existingTraces.length > 0 && body.force !== true) {
       return NextResponse.json(
         {
           error: {
             code: 'MEETING_ALREADY_EXISTS',
-            message: 'Réunion déjà générée pour ce run — relance bloquée pour éviter les doublons d’agents.',
+            message: 'Réunion déjà démarrée pour ce run — relance bloquée pour éviter les doublons d’agents.',
           },
           data: { tracesCount: existingTraces.length },
+        },
+        { status: 409 },
+      )
+    }
+
+    if (body.force === true && run.status === 'running') {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'RUN_ALREADY_RUNNING',
+            message: 'Une étape tourne déjà sur ce projet. Arrête-la avant de forcer une nouvelle réunion.',
+          },
         },
         { status: 409 },
       )
@@ -165,6 +212,8 @@ export async function POST(
       JSON.stringify(brief, null, 2),
     )
 
+    await syncStep2MeetingState(id)
+
     return NextResponse.json({ data: brief })
   } catch (e) {
     if (e instanceof MeetingLockError) {
@@ -181,5 +230,54 @@ export async function POST(
     )
   } finally {
     await releaseLock?.().catch(() => {})
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params
+    const run = await getRunById(id)
+
+    if (!run) {
+      return NextResponse.json(
+        { error: { code: 'NOT_FOUND', message: 'Run introuvable' } },
+        { status: 404 },
+      )
+    }
+
+    if (run.status === 'running' && run.currentStep === 2) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'MEETING_RUNNING',
+            message: 'Impossible de supprimer la réunion pendant son exécution.',
+          },
+        },
+        { status: 409 },
+      )
+    }
+
+    await resetRunFromStep({
+      runId: id,
+      storagePath: getStoragePath(id),
+      stepNumber: 2,
+    })
+
+    const updated = await getRunById(id)
+
+    return NextResponse.json({
+      data: {
+        run: updated,
+        message: 'Réunion supprimée. Le run revient à l’étape 2.',
+      },
+    })
+  } catch (e) {
+    return NextResponse.json(
+      { error: { code: 'MEETING_DELETE_ERROR', message: (e as Error).message } },
+      { status: 500 },
+    )
   }
 }

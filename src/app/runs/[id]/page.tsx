@@ -7,7 +7,7 @@ import { RunStepper } from '@/components/stepper/run-stepper'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import type { ProjectConfig, Run, RunStep } from '@/types/run'
+import type { LlmMode, ProjectConfig, Run, RunStep, StepLlmConfig } from '@/types/run'
 import { TOTAL_PIPELINE_STEPS } from '@/lib/pipeline/constants'
 import { getProjectStatusClass, getProjectStatusLabel, getRunStepLabel } from '@/lib/runs/presentation'
 import {
@@ -45,6 +45,13 @@ type PrimaryAction = {
   busy?: boolean
 }
 
+type LlmCatalog = {
+  localModels: string[]
+  localError: string | null
+  cloudModels: string[]
+  cloudAvailable: boolean
+}
+
 const STEP_EXPECTATIONS: Record<number, { label: string; expected: string }> = {
   1: { label: 'Idée', expected: 'intention.json — idée enrichie et cadrée' },
   2: { label: 'Brainstorm', expected: 'brief.json — réunion et sections agents' },
@@ -70,10 +77,10 @@ const STEP_ACTIONS: Record<number, string> = {
 }
 
 const STEP_VIEW_LABELS: Record<number, string> = {
-  2: 'Suivre la réunion brainstorm',
+  2: 'Ouvrir le studio brainstorm',
   5: 'Ouvrir le storyboard',
   6: 'Ouvrir les prompts',
-  7: 'Suivre la génération',
+  7: 'Ouvrir la génération',
   8: 'Ouvrir la preview',
   9: 'Ouvrir la publication',
 }
@@ -135,7 +142,7 @@ function getStepGuidance(params: {
         tone: 'green',
         title: 'Étape terminée — validation requise',
         body: nextAction
-          ? `Relis ce livrable puis décide : valider pour débloquer la suite (${nextAction}) ou relancer cette étape si le résultat n’est pas assez bon.`
+          ? `Relis ce livrable puis décide : valider cette étape pour simplement débloquer la suite (${nextAction}). Rien ne se lancera automatiquement.`
           : 'La dernière étape est terminée. Il ne reste plus de passage suivant à débloquer.',
       }
     }
@@ -208,6 +215,22 @@ function getFocalStep(run: RunWithSteps): number {
   return highestCompleted ?? 1
 }
 
+function isLlmBackedStep(stepNumber: number): boolean {
+  return [2, 3, 4, 6].includes(stepNumber)
+}
+
+function getStepLlmConfig(config: ProjectConfig | null | undefined, stepNumber: number): StepLlmConfig | null {
+  const key = String(stepNumber) as '2' | '3' | '4' | '6'
+  if (![2, 3, 4, 6].includes(stepNumber)) return null
+
+  if (config?.stepLlmConfigs?.[key]) return config.stepLlmConfigs[key] ?? null
+  if (stepNumber === 2 && config) {
+    return { mode: config.meetingLlmMode, model: config.meetingLlmModel }
+  }
+
+  return null
+}
+
 export default function RunPage() {
   const { id } = useParams<{ id: string }>()
   const [run, setRun] = useState<RunWithSteps | null>(null)
@@ -218,14 +241,18 @@ export default function RunPage() {
   const [savingDeliverable, setSavingDeliverable] = useState(false)
   const [deliverableNotice, setDeliverableNotice] = useState('')
   const [runNotice, setRunNotice] = useState('')
-  const [actionBusy, setActionBusy] = useState<'launch' | 'validate' | 'rewind' | 'kill' | null>(null)
+  const [actionBusy, setActionBusy] = useState<'launch' | 'validate' | 'rewind' | 'kill' | 'export-meeting' | 'delete-meeting' | null>(null)
   const [traces, setTraces] = useState<DashboardAgentTrace[]>([])
   const [failoverLog, setFailoverLog] = useState<DashboardFailoverEntry[]>([])
+  const [catalog, setCatalog] = useState<LlmCatalog>({ localModels: [], localError: null, cloudModels: [], cloudAvailable: false })
+  const [selectedLlmMode, setSelectedLlmMode] = useState<LlmMode>('local')
+  const [selectedLlmModel, setSelectedLlmModel] = useState('')
   const focalStep = useMemo(() => (run ? getFocalStep(run) : 1), [run])
   const selectedStep = selectedStepOverride ?? focalStep
 
   useEffect(() => {
     void loadRun()
+    void loadLlmCatalog()
     const interval = setInterval(() => {
       void loadRun()
     }, 3000)
@@ -264,6 +291,16 @@ export default function RunPage() {
     const res = await fetch(`/api/runs/${id}`)
     const json = await res.json()
     if (json.data) setRun(json.data)
+  }
+
+  async function loadLlmCatalog() {
+    try {
+      const res = await fetch('/api/llm/models', { cache: 'no-store' })
+      const json = await res.json()
+      if (json.data) setCatalog(json.data)
+    } catch {
+      setCatalog({ localModels: [], localError: 'Catalogue LLM indisponible', cloudModels: [], cloudAvailable: false })
+    }
   }
 
   async function loadTraces() {
@@ -321,13 +358,26 @@ export default function RunPage() {
 
   async function handleLaunchCurrentStep() {
     if (!run) return
+    if (isLlmBackedStep(selectedStep) && !selectedLlmModel.trim()) {
+      setRunNotice('Choisis un modèle LLM avant de lancer cette étape.')
+      return
+    }
+
     const needsConfirmation = run.status === 'paused' || run.status === 'failed'
     if (needsConfirmation && !confirm(`Relancer l'étape ${selectedStep} ? Les livrables aval seront remis à zéro.`)) return
 
     setActionBusy('launch')
     setRunNotice('')
     try {
-      const res = await fetch(`/api/runs/${id}/execute-step`, { method: 'POST' })
+      const res = await fetch(`/api/runs/${id}/execute-step`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          isLlmBackedStep(selectedStep)
+            ? { llmMode: selectedLlmMode, llmModel: selectedLlmModel.trim() }
+            : {},
+        ),
+      })
       const json = await res.json()
       if (!res.ok) {
         setRunNotice(json.error?.message ?? 'Lancement impossible')
@@ -401,6 +451,54 @@ export default function RunPage() {
     }
   }
 
+  async function handleExportMeetingJson() {
+    setActionBusy('export-meeting')
+    setRunNotice('')
+
+    try {
+      const res = await fetch(`/api/runs/${id}/meeting`, { cache: 'no-store' })
+      const json = await res.json()
+      if (!res.ok) {
+        setRunNotice(json.error?.message ?? 'Export JSON impossible')
+        return
+      }
+
+      const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `meeting-${id}.json`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      setRunNotice('Réunion exportée en JSON.')
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  async function handleDeleteMeeting() {
+    if (!confirm('Supprimer la réunion et remettre le run à l’étape 2 ?')) return
+
+    setActionBusy('delete-meeting')
+    setRunNotice('')
+    try {
+      const res = await fetch(`/api/runs/${id}/meeting`, { method: 'DELETE' })
+      const json = await res.json()
+      if (!res.ok) {
+        setRunNotice(json.error?.message ?? 'Suppression impossible')
+        return
+      }
+      setRunNotice(json.data?.message ?? 'Réunion supprimée.')
+      setTraces([])
+      await loadRun()
+      await loadDeliverable(2)
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
   const deliverablePreview = useMemo(() => {
     if (!deliverable?.content) return ''
     try {
@@ -414,6 +512,19 @@ export default function RunPage() {
     () => parseDeliverableContent(deliverable?.content),
     [deliverable?.content],
   )
+
+  const selectedStepLlmConfig = getStepLlmConfig(run?.projectConfig, selectedStep)
+
+  useEffect(() => {
+    if (!isLlmBackedStep(selectedStep)) return
+
+    const fallbackMode: LlmMode = selectedStepLlmConfig?.mode ?? (selectedStep === 4 ? 'cloud' : 'local')
+    const fallbackModel = selectedStepLlmConfig?.model
+      ?? (fallbackMode === 'cloud' ? catalog.cloudModels[0] ?? '' : catalog.localModels[0] ?? '')
+
+    setSelectedLlmMode(fallbackMode)
+    setSelectedLlmModel(fallbackModel)
+  }, [catalog.cloudModels, catalog.localModels, selectedStep, selectedStepLlmConfig?.mode, selectedStepLlmConfig?.model])
 
   if (!run) return <p className="text-sm text-muted-foreground">Chargement...</p>
 
@@ -438,8 +549,11 @@ export default function RunPage() {
   const isCurrentSelection = selectedStep === currentStep
   const canLaunchCurrentStep = isCurrentSelection && run.status === 'pending'
   const canValidateCurrentStep = isCurrentSelection && run.status === 'paused' && selectedRunStep?.status === 'completed' && currentStep < TOTAL_PIPELINE_STEPS
-  const canRelaunchCurrentStep = isCurrentSelection && (run.status === 'paused' || run.status === 'failed')
+  const canRelaunchCurrentStep = isCurrentSelection
+    && (run.status === 'paused' || run.status === 'failed')
+    && !(selectedStep === 2 && selectedRunStep?.status === 'completed')
   const canRewindToSelectedStep = selectedStep < currentStep && selectedRunStep?.status === 'completed' && run.status !== 'running'
+  const nextStepNumber = selectedStep < TOTAL_PIPELINE_STEPS ? selectedStep + 1 : null
   const validationChecks = buildValidationChecks({
     stepNumber: selectedStep,
     runStep: selectedRunStep,
@@ -454,8 +568,14 @@ export default function RunPage() {
   const latestCompletedStep = [...run.steps]
     .filter((step) => step.completedAt)
     .sort((a, b) => new Date(b.completedAt ?? 0).getTime() - new Date(a.completedAt ?? 0).getTime())[0] ?? null
+  const isStep2Focus = selectedStep === 2 && currentStep === 2
+  const hasMeeting = traces.length > 0
+  const isMeetingRunning = isStep2Focus && run.status === 'running'
+  const showMeetingPanel = isStep2Focus && (isMeetingRunning || hasMeeting)
 
   let primaryAction: PrimaryAction | null = null
+  let secondaryAction: PrimaryAction | null = null
+  let actionHint = ''
   if (run.status === 'running') {
     primaryAction = {
       label: actionBusy === 'kill' ? 'Arrêt en cours...' : 'Arrêter l’étape en cours',
@@ -464,13 +584,33 @@ export default function RunPage() {
       onClick: handleKill,
       busy: actionBusy === 'kill',
     }
+    if (isCurrentSelection && deliverable?.pageHref) {
+      secondaryAction = {
+        label: getStepViewLabel(selectedStep),
+        kind: 'link',
+        variant: 'outline',
+        href: deliverable.pageHref,
+      }
+    }
+    actionHint = 'Aucune étape suivante ne partira automatiquement pendant que celle-ci tourne.'
   } else if (canValidateCurrentStep) {
     primaryAction = {
-      label: actionBusy === 'validate' ? 'Validation...' : 'Valider et ouvrir la suite',
+      label: actionBusy === 'validate' ? 'Validation...' : `Valider l’étape ${selectedStep}`,
       kind: 'button',
       variant: 'default',
       onClick: handleValidateCurrentStep,
       busy: actionBusy === 'validate',
+    }
+    actionHint = nextStepNumber
+      ? `La validation ne lance rien : elle débloque seulement l’étape ${nextStepNumber}.`
+      : 'La validation clôt proprement la dernière étape.'
+    if (deliverable?.pageHref) {
+      secondaryAction = {
+        label: getStepViewLabel(selectedStep),
+        kind: 'link',
+        variant: 'outline',
+        href: deliverable.pageHref,
+      }
     }
   } else if (canLaunchCurrentStep) {
     primaryAction = {
@@ -480,14 +620,20 @@ export default function RunPage() {
       onClick: handleLaunchCurrentStep,
       busy: actionBusy === 'launch',
     }
+    actionHint = isLlmBackedStep(selectedStep)
+      ? `LLM prévu : ${selectedLlmMode} · ${selectedLlmModel || 'à choisir'}. Le projet exécutera uniquement cette étape.`
+      : 'Le projet exécutera uniquement cette étape, puis se remettra en pause pour validation.'
   } else if (canRelaunchCurrentStep) {
     primaryAction = {
-      label: actionBusy === 'launch' ? 'Relance...' : 'Relancer cette étape',
+      label: actionBusy === 'launch' ? 'Relance...' : `Relancer l’étape ${selectedStep}`,
       kind: 'button',
       variant: 'default',
       onClick: handleLaunchCurrentStep,
       busy: actionBusy === 'launch',
     }
+    actionHint = isLlmBackedStep(selectedStep)
+      ? `LLM prévu : ${selectedLlmMode} · ${selectedLlmModel || 'à choisir'}. Cette relance réécrasera les livrables aval.`
+      : 'Cette relance réécrasera les livrables aval déjà produits à partir de cette étape.'
   } else if (canRewindToSelectedStep) {
     primaryAction = {
       label: actionBusy === 'rewind' ? 'Repositionnement...' : 'Repartir depuis cette étape',
@@ -496,6 +642,7 @@ export default function RunPage() {
       onClick: handleRewindToSelectedStep,
       busy: actionBusy === 'rewind',
     }
+    actionHint = 'Le tunnel sera rouvert à partir de cette étape et les suivantes seront remises à zéro.'
   } else if (deliverable?.pageHref) {
     primaryAction = {
       label: getStepViewLabel(selectedStep),
@@ -507,13 +654,8 @@ export default function RunPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div>
         <h1 className="text-xl font-semibold truncate max-w-md">{run.idea}</h1>
-        {run.status === 'running' && (
-          <Button variant="destructive" size="sm" onClick={handleKill} disabled={actionBusy === 'kill'}>
-            {actionBusy === 'kill' ? 'Arrêt...' : 'Arrêter'}
-          </Button>
-        )}
       </div>
 
       <div className="mt-4">
@@ -530,7 +672,7 @@ export default function RunPage() {
       {run.status === 'paused' && (
         <div className="mt-6 rounded-md border border-green-200 bg-green-50 p-4">
           <p className="text-sm text-green-700">
-            Étape {currentStep} terminée. Valide-la explicitement avant de débloquer l’étape suivante.
+            Étape {currentStep} terminée. La validation débloque seulement l’étape suivante : rien ne repart automatiquement.
           </p>
         </div>
       )}
@@ -554,49 +696,53 @@ export default function RunPage() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Cockpit projet</CardTitle>
-              <CardDescription>
-                Vue rapide pour savoir où tu en es et ce qui se passe réellement maintenant.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-lg border px-3 py-3">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">Statut</div>
-                <div className={`mt-1 text-sm font-semibold ${getProjectStatusClass(run.status)}`}>
-                  {getProjectStatusLabel(run)}
+          {!isStep2Focus && (
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle>Cockpit projet</CardTitle>
+                <CardDescription>
+                  Vue rapide pour savoir où tu en es et ce qui se passe réellement maintenant.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-lg border px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Statut</div>
+                  <div className={`mt-1 text-sm font-semibold ${getProjectStatusClass(run.status)}`}>
+                    {getProjectStatusLabel(run)}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">{completedSteps}/{TOTAL_PIPELINE_STEPS} étapes terminées</div>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">{completedSteps}/{TOTAL_PIPELINE_STEPS} étapes terminées</div>
-              </div>
 
-              <div className="rounded-lg border px-3 py-3">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">Étape active</div>
-                <div className="mt-1 text-sm font-semibold">{getRunStepLabel(run)}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{getStepActionLabel(currentStep)}</div>
-              </div>
+                <div className="rounded-lg border px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Étape active</div>
+                  <div className="mt-1 text-sm font-semibold">{getRunStepLabel(run)}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{getStepActionLabel(currentStep)}</div>
+                </div>
 
-              <div className="rounded-lg border px-3 py-3">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">Santé runtime</div>
-                <div className="mt-1 text-sm font-semibold">
-                  Heartbeat {run.lastHeartbeat ? formatRelativeTime(run.lastHeartbeat) : '—'}
+                <div className="rounded-lg border px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Santé runtime</div>
+                  <div className="mt-1 text-sm font-semibold">
+                    Heartbeat {run.lastHeartbeat ? formatRelativeTime(run.lastHeartbeat) : '—'}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Durée étape : {formatStepDuration(currentRunStep)}
+                  </div>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Durée étape : {formatStepDuration(currentRunStep)}
-                </div>
-              </div>
 
-              <div className="rounded-lg border px-3 py-3">
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">Configuration réunion</div>
-                <div className="mt-1 text-sm font-semibold">
-                  {run.projectConfig ? `${run.projectConfig.meetingLlmMode} · ${run.projectConfig.meetingLlmModel}` : 'Non renseignée'}
+                <div className="rounded-lg border px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">LLM étape inspectée</div>
+                  <div className="mt-1 text-sm font-semibold">
+                    {isLlmBackedStep(selectedStep) && selectedStepLlmConfig
+                      ? `${selectedStepLlmConfig.mode} · ${selectedStepLlmConfig.model}`
+                      : 'Aucun LLM sur cette étape'}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Coût run : {(run.costEur ?? 0).toFixed(2)} €
+                  </div>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Coût run : {(run.costEur ?? 0).toFixed(2)} €
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
@@ -607,6 +753,65 @@ export default function RunPage() {
               <div className={`rounded-md border px-3 py-3 text-sm ${guidanceToneClasses}`}>
                 {selectedGuidance.body}
               </div>
+
+              {isLlmBackedStep(selectedStep) && isCurrentSelection && (
+                <div className="rounded-lg border p-3 space-y-3">
+                  <div>
+                    <div className="text-sm font-medium">LLM pour l’étape {selectedStep}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Cloud dispo : {catalog.cloudModels.join(' · ') || 'aucun catalogue cloud reçu'}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
+                    <div>
+                      <label htmlFor="step-llm-mode" className="text-xs font-medium text-muted-foreground">Mode</label>
+                      <select
+                        id="step-llm-mode"
+                        value={selectedLlmMode}
+                        onChange={(e) => setSelectedLlmMode(e.target.value as LlmMode)}
+                        className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+                        disabled={run.status === 'running'}
+                      >
+                        <option value="local">Local</option>
+                        <option value="cloud">Cloud</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label htmlFor="step-llm-model" className="text-xs font-medium text-muted-foreground">Modèle</label>
+                      {(selectedLlmMode === 'cloud' ? catalog.cloudModels : catalog.localModels).length > 0 ? (
+                        <select
+                          id="step-llm-model"
+                          value={selectedLlmModel}
+                          onChange={(e) => setSelectedLlmModel(e.target.value)}
+                          className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+                          disabled={run.status === 'running'}
+                        >
+                          {(selectedLlmMode === 'cloud' ? catalog.cloudModels : catalog.localModels).map((model) => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id="step-llm-model"
+                          value={selectedLlmModel}
+                          onChange={(e) => setSelectedLlmModel(e.target.value)}
+                          placeholder={selectedLlmMode === 'cloud' ? 'deepseek-v3.1:671b-cloud' : 'qwen2.5:7b'}
+                          className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+                          disabled={run.status === 'running'}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {catalog.localError && selectedLlmMode === 'local' && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      {catalog.localError}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {primaryAction && (
                 primaryAction.kind === 'link' && primaryAction.href ? (
@@ -627,25 +832,30 @@ export default function RunPage() {
                 )
               )}
 
-              <div className="flex flex-wrap gap-2">
-                {canValidateCurrentStep && canRelaunchCurrentStep && (
-                  <Button variant="outline" onClick={handleLaunchCurrentStep} disabled={actionBusy === 'launch'} size="sm">
-                    {actionBusy === 'launch' ? 'Relance...' : 'Relancer cette étape'}
-                  </Button>
-                )}
-                {canRewindToSelectedStep && !primaryAction?.label.includes('Repartir') && (
-                  <Button variant="outline" onClick={handleRewindToSelectedStep} disabled={actionBusy === 'rewind'} size="sm">
-                    {actionBusy === 'rewind' ? 'Repositionnement...' : 'Repartir depuis cette étape'}
-                  </Button>
-                )}
-                {deliverable?.pageHref && (!primaryAction || primaryAction.kind !== 'link') && (
-                  <Link href={deliverable.pageHref} className="inline-flex">
-                    <Button variant="outline" size="sm">
-                      {getStepViewLabel(selectedStep)}
+              {actionHint && (
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  {actionHint}
+                </div>
+              )}
+
+              {secondaryAction && (
+                secondaryAction.kind === 'link' && secondaryAction.href ? (
+                  <Link href={secondaryAction.href} className="inline-flex w-full">
+                    <Button variant={secondaryAction.variant ?? 'outline'} className="w-full justify-center">
+                      {secondaryAction.label}
                     </Button>
                   </Link>
-                )}
-              </div>
+                ) : (
+                  <Button
+                    variant={secondaryAction.variant ?? 'outline'}
+                    className="w-full justify-center"
+                    onClick={secondaryAction.onClick}
+                    disabled={secondaryAction.busy}
+                  >
+                    {secondaryAction.label}
+                  </Button>
+                )
+              )}
 
               {runNotice && (
                 <div className="rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-900">
@@ -655,34 +865,36 @@ export default function RunPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Repères utiles</CardTitle>
-              <CardDescription>Contexte minimal pour ne pas te perdre entre deux validations.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                <span className="text-muted-foreground">Étape inspectée</span>
-                <span className="font-medium">{selectedStep}/{TOTAL_PIPELINE_STEPS}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                <span className="text-muted-foreground">Dernière étape finie</span>
-                <span className="font-medium">
-                  {latestCompletedStep ? `Étape ${latestCompletedStep.stepNumber}` : 'Aucune'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                <span className="text-muted-foreground">Fin dernière activité</span>
-                <span className="font-medium">
-                  {latestCompletedStep?.completedAt ? formatRelativeTime(latestCompletedStep.completedAt) : '—'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                <span className="text-muted-foreground">Traces réunion</span>
-                <span className="font-medium">{traces.length}</span>
-              </div>
-            </CardContent>
-          </Card>
+          {!isStep2Focus && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Repères utiles</CardTitle>
+                <CardDescription>Contexte minimal pour ne pas te perdre entre deux validations.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                  <span className="text-muted-foreground">Étape inspectée</span>
+                  <span className="font-medium">{selectedStep}/{TOTAL_PIPELINE_STEPS}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                  <span className="text-muted-foreground">Dernière étape finie</span>
+                  <span className="font-medium">
+                    {latestCompletedStep ? `Étape ${latestCompletedStep.stepNumber}` : 'Aucune'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                  <span className="text-muted-foreground">Fin dernière activité</span>
+                  <span className="font-medium">
+                    {latestCompletedStep?.completedAt ? formatRelativeTime(latestCompletedStep.completedAt) : '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                  <span className="text-muted-foreground">Traces réunion</span>
+                  <span className="font-medium">{traces.length}</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="lg:col-span-2">
             <CardHeader>
@@ -749,86 +961,127 @@ export default function RunPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle>
-                  Vue contextuelle — Étape {selectedStep} · {currentStepInfo?.label ?? selectedRunStep?.stepName}
-                </CardTitle>
-                <CardDescription>
-                  {deliverable?.expected ?? currentStepInfo?.expected}
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={selectedRunStep?.status === 'completed' ? 'default' : selectedRunStep?.status === 'running' ? 'secondary' : selectedRunStep?.status === 'failed' ? 'destructive' : 'outline'}>
-                  {STATUS_LABELS[selectedStatus] ?? selectedStatus}
-                </Badge>
-                {deliverable?.fileName && <Badge variant="outline">{deliverable.fileName}</Badge>}
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loadingDeliverable ? (
-              <div className="rounded-md border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
-                Chargement du livrable...
-              </div>
-            ) : contextSections.length === 0 ? (
-              <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
-                Aucune vue contextuelle disponible pour cette étape.
-              </div>
-            ) : (
-              <div className="grid gap-3 md:grid-cols-2">
-                {contextSections.map((section) => (
-                  <div key={section.title} className="rounded-lg border p-4">
-                    <div className="text-sm font-semibold">{section.title}</div>
-                    {section.description && (
-                      <div className="mt-1 text-xs text-muted-foreground">{section.description}</div>
-                    )}
-                    {section.body && (
-                      <div className="mt-3 rounded-md bg-muted/40 px-3 py-2 text-sm">{section.body}</div>
-                    )}
-                    {section.items && section.items.length > 0 && (
-                      <div className="mt-3 space-y-2">
-                        {section.items.map((item) => (
-                          <div key={`${section.title}-${item.label}-${item.value}`} className={`rounded-md border px-3 py-2 text-sm ${item.tone ? CHECK_TONE_CLASSES[item.tone] : 'border-border bg-background text-foreground'}`}>
-                            <div className="text-xs uppercase tracking-wide text-muted-foreground">{item.label}</div>
-                            <div className="mt-1">{item.value}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+        {isStep2Focus ? (
+          showMeetingPanel ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>Réunion brainstorm</CardTitle>
+                    <CardDescription>
+                      {isMeetingRunning
+                        ? 'La réunion tourne. Ouvre le studio pour la suivre.'
+                        : 'La réunion existe déjà. Tu peux juste la revoir, l’exporter ou la supprimer.'}
+                    </CardDescription>
                   </div>
-                ))}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={isMeetingRunning ? 'secondary' : 'default'}>
+                      {isMeetingRunning ? 'en cours' : 'terminée'}
+                    </Badge>
+                    <Badge variant="outline">{traces.length} trace(s)</Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Link href={`/runs/${id}/studio`} className="inline-flex">
+                    <Button className="justify-center">
+                      {isMeetingRunning ? 'Assister à la réunion' : 'Voir la réunion'}
+                    </Button>
+                  </Link>
+                  {!isMeetingRunning && (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={handleExportMeetingJson}
+                        disabled={actionBusy === 'export-meeting'}
+                      >
+                        {actionBusy === 'export-meeting' ? 'Export...' : 'Exporter en JSON'}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={handleDeleteMeeting}
+                        disabled={actionBusy === 'delete-meeting'}
+                      >
+                        {actionBusy === 'delete-meeting' ? 'Suppression...' : 'Supprimer la réunion'}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null
+        ) : (
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle>
+                    Vue contextuelle — Étape {selectedStep} · {currentStepInfo?.label ?? selectedRunStep?.stepName}
+                  </CardTitle>
+                  <CardDescription>
+                    {deliverable?.expected ?? currentStepInfo?.expected}
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={selectedRunStep?.status === 'completed' ? 'default' : selectedRunStep?.status === 'running' ? 'secondary' : selectedRunStep?.status === 'failed' ? 'destructive' : 'outline'}>
+                    {STATUS_LABELS[selectedStatus] ?? selectedStatus}
+                  </Badge>
+                  {deliverable?.fileName && <Badge variant="outline">{deliverable.fileName}</Badge>}
+                </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent>
+              {loadingDeliverable ? (
+                <div className="rounded-md border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
+                  Chargement du livrable...
+                </div>
+              ) : contextSections.length === 0 ? (
+                <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                  Aucune vue contextuelle disponible pour cette étape.
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {contextSections.map((section) => (
+                    <div key={section.title} className="rounded-lg border p-4">
+                      <div className="text-sm font-semibold">{section.title}</div>
+                      {section.description && (
+                        <div className="mt-1 text-xs text-muted-foreground">{section.description}</div>
+                      )}
+                      {section.body && (
+                        <div className="mt-3 rounded-md bg-muted/40 px-3 py-2 text-sm">{section.body}</div>
+                      )}
+                      {section.items && section.items.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {section.items.map((item) => (
+                            <div key={`${section.title}-${item.label}-${item.value}`} className={`rounded-md border px-3 py-2 text-sm ${item.tone ? CHECK_TONE_CLASSES[item.tone] : 'border-border bg-background text-foreground'}`}>
+                              <div className="text-xs uppercase tracking-wide text-muted-foreground">{item.label}</div>
+                              <div className="mt-1">{item.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
-            <CardTitle>Vues rapides</CardTitle>
+            <CardTitle>Inspecter le livrable</CardTitle>
             <CardDescription>
-              Raccourcis utiles pour ouvrir la vue dédiée de l’étape sans quitter le cockpit.
+              Une seule entrée utile pour l’étape choisie, puis les détails avancés si tu veux creuser.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {deliverable?.pageHref && (
-                <Link href={deliverable.pageHref} className="inline-flex">
-                  <Button variant="outline" size="sm">{getStepViewLabel(selectedStep)}</Button>
-                </Link>
-              )}
-              <Link href={`/runs/${id}/preview`} className="inline-flex">
-                <Button variant="outline" size="sm">Preview</Button>
+            {deliverable?.pageHref && (
+              <Link href={deliverable.pageHref} className="inline-flex w-full">
+                <Button variant="outline" className="w-full justify-center">{getStepViewLabel(selectedStep)}</Button>
               </Link>
-              <Link href={`/runs/${id}/storyboard`} className="inline-flex">
-                <Button variant="outline" size="sm">Storyboard</Button>
-              </Link>
-              <Link href={`/runs/${id}/studio`} className="inline-flex">
-                <Button variant="outline" size="sm">Réunion</Button>
-              </Link>
-            </div>
+            )}
 
             {deliverableNotice && (
               <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
