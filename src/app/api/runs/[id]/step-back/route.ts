@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
-import { getRunById, updateRunStatus } from '@/lib/db/queries/runs'
+import { join } from 'path'
+import { getRunById } from '@/lib/db/queries/runs'
+import { resetRunFromStep } from '@/lib/pipeline/reset'
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -15,6 +17,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       )
     }
 
+    if (r.status === 'running') {
+      return NextResponse.json(
+        { error: { code: 'INVALID_STATE', message: 'Impossible de revenir en arrière pendant une exécution en cours' } },
+        { status: 409 }
+      )
+    }
+
     if (targetStep < 1 || targetStep >= (r.currentStep ?? 1)) {
       return NextResponse.json(
         { error: { code: 'VALIDATION_ERROR', message: 'Étape cible invalide' } },
@@ -22,7 +31,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       )
     }
 
-    const updated = await updateRunStatus(id, 'running', targetStep)
+    await resetRunFromStep({
+      runId: id,
+      storagePath: join(process.cwd(), 'storage', 'runs', id),
+      stepNumber: targetStep,
+    })
+
+    const updated = await getRunById(id)
     return NextResponse.json({ data: updated })
   } catch (e) {
     return NextResponse.json(

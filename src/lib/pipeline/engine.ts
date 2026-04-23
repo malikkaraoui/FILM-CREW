@@ -33,13 +33,19 @@ const STEPS: PipelineStep[] = [
   step8Publish,
 ]
 
+type ExecutePipelineOptions = {
+  mode?: 'continuous' | 'single-step'
+}
+
 /**
  * Exécute le pipeline à partir de l'étape courante du run.
  * Chaque étape est exécutée séquentiellement avec mise à jour DB.
  */
-export async function executePipeline(runId: string): Promise<void> {
+export async function executePipeline(runId: string, options: ExecutePipelineOptions = {}): Promise<void> {
   const run = await getRunById(runId)
   if (!run) throw new Error(`Run ${runId} introuvable`)
+
+  const mode = options.mode ?? 'continuous'
 
   const chain = run.chainId ? await getChainById(run.chainId) : null
   if (run.chainId && !chain) throw new Error(`Chaîne ${run.chainId} introuvable`)
@@ -68,7 +74,7 @@ export async function executePipeline(runId: string): Promise<void> {
   const startStep = run.currentStep ?? 1
   let totalCost = run.costEur ?? 0
 
-  logger.info({ event: 'pipeline_start', runId, startStep })
+  logger.info({ event: 'pipeline_start', runId, startStep, mode })
 
   for (let i = startStep - 1; i < STEPS.length; i++) {
     const step = STEPS[i]
@@ -119,6 +125,23 @@ export async function executePipeline(runId: string): Promise<void> {
       }
 
       logger.info({ event: 'step_completed', runId, step: step.name, costEur: result.costEur })
+
+      if (step.stepNumber === FINAL_PIPELINE_STEP) {
+        await updateRunStatus(runId, 'completed', FINAL_PIPELINE_STEP)
+        logger.info({ event: 'pipeline_complete', runId, totalCost })
+        return
+      }
+
+      if (mode === 'single-step') {
+        await updateRunStatus(runId, 'paused', step.stepNumber)
+        logger.info({
+          event: 'pipeline_step_waiting_validation',
+          runId,
+          stepNumber: step.stepNumber,
+          nextStep: step.stepNumber + 1,
+        })
+        return
+      }
     } catch (e) {
       clearInterval(heartbeatInterval)
       const error = (e as Error).message
@@ -131,6 +154,10 @@ export async function executePipeline(runId: string): Promise<void> {
 
   await updateRunStatus(runId, 'completed', FINAL_PIPELINE_STEP)
   logger.info({ event: 'pipeline_complete', runId, totalCost })
+}
+
+export async function executeSingleStep(runId: string): Promise<void> {
+  await executePipeline(runId, { mode: 'single-step' })
 }
 
 async function updateStepStatus(

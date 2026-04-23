@@ -6,10 +6,11 @@ import Link from 'next/link'
 import { RunStepper } from '@/components/stepper/run-stepper'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import type { Run, RunStep } from '@/types/run'
-import { TOTAL_PIPELINE_STEPS, formatPipelineStepLabel } from '@/lib/pipeline/constants'
+import type { ProjectConfig, Run, RunStep } from '@/types/run'
+import { TOTAL_PIPELINE_STEPS } from '@/lib/pipeline/constants'
+import { getProjectStatusClass, getProjectStatusLabel, getRunStepLabel } from '@/lib/runs/presentation'
 
-type RunWithSteps = Run & { steps: RunStep[] }
+type RunWithSteps = Run & { steps: RunStep[]; projectConfig?: ProjectConfig | null }
 
 type Deliverable = {
   stepNumber: number
@@ -59,8 +60,10 @@ const STEP_VIEW_LABELS: Record<number, string> = {
 const STATUS_LABELS: Record<string, string> = {
   pending: 'à venir',
   running: 'en cours',
+  paused: 'à valider',
   completed: 'terminée',
   failed: 'échouée',
+  killed: 'arrêtée',
 }
 
 function getStepActionLabel(stepNumber: number): string {
@@ -75,45 +78,86 @@ function getStepGuidance(params: {
   stepNumber: number
   stepStatus: string
   currentStep: number
+  runStatus: string
 }): { tone: 'amber' | 'blue' | 'green' | 'red'; title: string; body: string } {
-  const { stepNumber, stepStatus, currentStep } = params
+  const { stepNumber, stepStatus, currentStep, runStatus } = params
   const action = getStepActionLabel(stepNumber)
   const currentLabel = STEP_EXPECTATIONS[currentStep]?.label ?? `Étape ${currentStep}`
   const previousLabel = STEP_EXPECTATIONS[Math.max(1, stepNumber - 1)]?.label ?? `Étape ${Math.max(1, stepNumber - 1)}`
   const nextAction = stepNumber < TOTAL_PIPELINE_STEPS ? getStepActionLabel(stepNumber + 1) : null
 
-  if (stepStatus === 'running') {
-    return {
-      tone: 'blue',
-      title: 'Étape en cours maintenant',
-      body: `Le pipeline exécute actuellement : ${action}. Tu n’as rien à relancer ici. Tu peux patienter ou ouvrir la vue dédiée pour suivre ce qui se passe en direct.`,
+  if (stepNumber === currentStep) {
+    if (runStatus === 'running') {
+      return {
+        tone: 'blue',
+        title: 'Étape en cours maintenant',
+        body: `Le projet exécute actuellement : ${action}. Rien ne partira plus loin automatiquement ensuite.`,
+      }
+    }
+
+    if (runStatus === 'paused' && stepStatus === 'completed') {
+      return {
+        tone: 'green',
+        title: 'Étape terminée — validation requise',
+        body: nextAction
+          ? `Relis ce livrable puis décide : valider pour débloquer la suite (${nextAction}) ou relancer cette étape si le résultat n’est pas assez bon.`
+          : 'La dernière étape est terminée. Il ne reste plus de passage suivant à débloquer.',
+      }
+    }
+
+    if (runStatus === 'failed' || stepStatus === 'failed') {
+      return {
+        tone: 'red',
+        title: 'Étape en erreur',
+        body: `Cette étape a échoué pendant : ${action}. Corrige le blocage puis relance uniquement cette étape.`,
+      }
+    }
+
+    if (runStatus === 'pending') {
+      return {
+        tone: 'amber',
+        title: 'Étape prête à être lancée',
+        body: `Action attendue ici : ${action}. Une fois terminée, le projet s’arrêtera en attente de ta validation.`,
+      }
+    }
+
+    if (runStatus === 'completed') {
+      return {
+        tone: 'green',
+        title: 'Projet terminé',
+        body: 'Le pipeline est arrivé au bout. Tu peux relire les livrables ou repartir d’une étape précédente si besoin.',
+      }
+    }
+
+    if (runStatus === 'killed') {
+      return {
+        tone: 'red',
+        title: 'Projet arrêté',
+        body: 'Le projet a été stoppé. Tu peux repartir depuis une étape déjà terminée si tu veux reprendre proprement.',
+      }
     }
   }
 
   if (stepStatus === 'completed') {
     return {
       tone: 'green',
-      title: 'Étape déjà terminée',
-      body: nextAction
-        ? `Cette étape est terminée. Prochaine étape du workflow : ${nextAction}.`
-        : 'Cette étape est terminée. Tu es au bout du workflow.' ,
+      title: 'Étape déjà produite',
+      body: 'Ce livrable existe déjà. Tu peux le consulter ou repartir depuis ici si tu veux réouvrir le tunnel à partir de cette étape.',
     }
   }
 
-  if (stepStatus === 'failed') {
+  if (stepStatus === 'running') {
     return {
-      tone: 'red',
-      title: 'Étape en erreur',
-      body: `Cette étape a échoué pendant : ${action}. Corrige le blocage puis relance à partir de cette étape.`,
+      tone: 'blue',
+      title: 'Étape actuellement en cours',
+      body: 'Cette étape tourne en ce moment. Attends sa fin avant toute autre décision.',
     }
   }
 
   return {
     tone: 'amber',
-    title: stepNumber === currentStep ? 'Étape prête à être lancée' : 'Étape pas encore démarrée',
-    body: stepNumber === currentStep
-      ? `Action attendue ici : ${action}.`
-      : `Tu ne peux pas lancer cette étape tout de suite. Il faut d’abord terminer l’étape précédente : ${previousLabel}. Étape active actuelle : ${currentLabel}.`,
+    title: 'Étape verrouillée',
+    body: `Tu ne peux pas lancer cette étape tout de suite. Il faut d’abord terminer et valider : ${previousLabel}. Étape focalisée actuelle : ${currentLabel}.`,
   }
 }
 
@@ -126,10 +170,14 @@ export default function RunPage() {
   const [loadingDeliverable, setLoadingDeliverable] = useState(false)
   const [savingDeliverable, setSavingDeliverable] = useState(false)
   const [deliverableNotice, setDeliverableNotice] = useState('')
+  const [runNotice, setRunNotice] = useState('')
+  const [actionBusy, setActionBusy] = useState<'launch' | 'validate' | 'rewind' | 'kill' | null>(null)
 
   useEffect(() => {
-    loadRun()
-    const interval = setInterval(loadRun, 3000) // polling 2-3s
+    void loadRun()
+    const interval = setInterval(() => {
+      void loadRun()
+    }, 3000)
     return () => clearInterval(interval)
   }, [id])
 
@@ -190,14 +238,86 @@ export default function RunPage() {
     }
   }
 
-  async function handleStepBack(stepNumber: number) {
-    if (!confirm(`Revenir à l'étape ${stepNumber} ?`)) return
-    await fetch(`/api/runs/${id}/step-back`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetStep: stepNumber }),
-    })
-    loadRun()
+  async function handleLaunchCurrentStep() {
+    if (!run) return
+    const needsConfirmation = run.status === 'paused' || run.status === 'failed'
+    if (needsConfirmation && !confirm(`Relancer l'étape ${selectedStep} ? Les livrables aval seront remis à zéro.`)) return
+
+    setActionBusy('launch')
+    setRunNotice('')
+    try {
+      const res = await fetch(`/api/runs/${id}/execute-step`, { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) {
+        setRunNotice(json.error?.message ?? 'Lancement impossible')
+        return
+      }
+      setRunNotice(`Étape ${json.data.stepNumber} lancée.`)
+      await loadRun()
+      await loadDeliverable(selectedStep)
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  async function handleValidateCurrentStep() {
+    setActionBusy('validate')
+    setRunNotice('')
+    try {
+      const res = await fetch(`/api/runs/${id}/validate-step`, { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) {
+        setRunNotice(json.error?.message ?? 'Validation impossible')
+        return
+      }
+      setRunNotice(`Étape ${selectedStep} validée. La suite est débloquée.`)
+      await loadRun()
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  async function handleRewindToSelectedStep() {
+    if (!confirm(`Repartir depuis l'étape ${selectedStep} ? Les livrables des étapes suivantes seront remis à zéro.`)) return
+
+    setActionBusy('rewind')
+    setRunNotice('')
+    try {
+      const res = await fetch(`/api/runs/${id}/step-back`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetStep: selectedStep }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setRunNotice(json.error?.message ?? 'Retour impossible')
+        return
+      }
+      setRunNotice(`Le projet est repositionné sur l'étape ${selectedStep}.`)
+      await loadRun()
+      await loadDeliverable(selectedStep)
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  async function handleKill() {
+    if (!confirm('Arrêter l’étape en cours ?')) return
+
+    setActionBusy('kill')
+    setRunNotice('')
+    try {
+      const res = await fetch(`/api/runs/${id}/kill`, { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) {
+        setRunNotice(json.error?.message ?? 'Arrêt impossible')
+        return
+      }
+      setRunNotice('Projet arrêté.')
+      await loadRun()
+    } finally {
+      setActionBusy(null)
+    }
   }
 
   const deliverablePreview = useMemo(() => {
@@ -219,6 +339,7 @@ export default function RunPage() {
     stepNumber: selectedStep,
     stepStatus: selectedStatus,
     currentStep,
+    runStatus: run.status,
   })
   const guidanceToneClasses = {
     amber: 'border-amber-300 bg-amber-50 text-amber-900',
@@ -226,41 +347,45 @@ export default function RunPage() {
     green: 'border-green-300 bg-green-50 text-green-900',
     red: 'border-destructive bg-destructive/10 text-destructive',
   }[selectedGuidance.tone]
+  const isCurrentSelection = selectedStep === currentStep
+  const canLaunchCurrentStep = isCurrentSelection && run.status === 'pending'
+  const canValidateCurrentStep = isCurrentSelection && run.status === 'paused' && selectedRunStep?.status === 'completed' && currentStep < TOTAL_PIPELINE_STEPS
+  const canRelaunchCurrentStep = isCurrentSelection && (run.status === 'paused' || run.status === 'failed')
+  const canRewindToSelectedStep = selectedStep < currentStep && selectedRunStep?.status === 'completed' && run.status !== 'running'
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold truncate max-w-md">{run.idea}</h1>
         {run.status === 'running' && (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={async () => {
-              if (!confirm('Arrêter ce run ?')) return
-              await fetch(`/api/runs/${id}/kill`, { method: 'POST' })
-              loadRun()
-            }}
-          >
-            Arrêter
+          <Button variant="destructive" size="sm" onClick={handleKill} disabled={actionBusy === 'kill'}>
+            {actionBusy === 'kill' ? 'Arrêt...' : 'Arrêter'}
           </Button>
         )}
       </div>
 
       <div className="mt-4">
-        <RunStepper steps={run.steps} currentStep={currentStep} onStepClick={handleStepBack} />
+        <RunStepper steps={run.steps} currentStep={currentStep} />
       </div>
 
       {run.status === 'pending' && (
         <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm text-amber-700">
-            Run en attente de démarrage...
+            Projet prêt : l’étape {currentStep} attend ton lancement manuel.
+          </p>
+        </div>
+      )}
+      {run.status === 'paused' && (
+        <div className="mt-6 rounded-md border border-green-200 bg-green-50 p-4">
+          <p className="text-sm text-green-700">
+            Étape {currentStep} terminée. Valide-la explicitement avant de débloquer l’étape suivante.
           </p>
         </div>
       )}
       {run.status === 'failed' && (
         <div className="mt-6 rounded-md border border-destructive bg-destructive/10 p-4">
           <p className="text-sm text-destructive">
-            Le pipeline a échoué à l&apos;étape {currentStep}.
+            Le projet a échoué à l&apos;étape {currentStep}.
             {run.steps.find(s => s.stepNumber === currentStep)?.error && (
               <span className="block mt-1 font-mono text-xs">{run.steps.find(s => s.stepNumber === currentStep)?.error}</span>
             )}
@@ -270,7 +395,7 @@ export default function RunPage() {
       {run.status === 'completed' && (
         <div className="mt-6 rounded-md border border-green-200 bg-green-50 p-4">
           <p className="text-sm text-green-700">
-            Pipeline terminé — {run.steps.filter(s => s.status === 'completed').length}/{TOTAL_PIPELINE_STEPS} étapes complétées.
+            Projet terminé — {run.steps.filter(s => s.status === 'completed').length}/{TOTAL_PIPELINE_STEPS} étapes complétées.
           </p>
         </div>
       )}
@@ -280,9 +405,14 @@ export default function RunPage() {
           <div className="rounded-lg border p-4">
             <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
               <span>Coût : {(run.costEur ?? 0).toFixed(2)} €</span>
-              <span>Statut : {STATUS_LABELS[run.status] ?? run.status}</span>
-              <span>Étape active : {formatPipelineStepLabel(currentStep)}</span>
-              <span>Action en cours : {getStepActionLabel(currentStep)}</span>
+              <span className={getProjectStatusClass(run.status)}>Statut : {getProjectStatusLabel(run)}</span>
+              <span>Étape focale : {getRunStepLabel(run)}</span>
+              <span>Action attendue : {getStepActionLabel(currentStep)}</span>
+              {run.projectConfig && (
+                <span>
+                  Réunion LLM : {run.projectConfig.meetingLlmMode} · {run.projectConfig.meetingLlmModel}
+                </span>
+              )}
             </div>
           </div>
 
@@ -290,7 +420,7 @@ export default function RunPage() {
             <div>
               <h2 className="text-base font-semibold">Tunnel {TOTAL_PIPELINE_STEPS} étapes</h2>
               <p className="text-sm text-muted-foreground">
-                Chaque carte = un livrable attendu. Clique une étape pour consulter son contenu juste à droite.
+                Chaque carte = un livrable attendu. Tu consultes ici, puis tu décides explicitement quand avancer.
               </p>
             </div>
 
@@ -350,6 +480,26 @@ export default function RunPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            {canLaunchCurrentStep && (
+              <Button onClick={handleLaunchCurrentStep} disabled={actionBusy === 'launch'} size="sm">
+                {actionBusy === 'launch' ? 'Lancement...' : `Lancer l’étape ${selectedStep}`}
+              </Button>
+            )}
+            {canValidateCurrentStep && (
+              <Button onClick={handleValidateCurrentStep} disabled={actionBusy === 'validate'} size="sm">
+                {actionBusy === 'validate' ? 'Validation...' : 'Valider et débloquer la suite'}
+              </Button>
+            )}
+            {canRelaunchCurrentStep && (
+              <Button variant="outline" onClick={handleLaunchCurrentStep} disabled={actionBusy === 'launch'} size="sm">
+                {actionBusy === 'launch' ? 'Relance...' : 'Relancer cette étape'}
+              </Button>
+            )}
+            {canRewindToSelectedStep && (
+              <Button variant="outline" onClick={handleRewindToSelectedStep} disabled={actionBusy === 'rewind'} size="sm">
+                {actionBusy === 'rewind' ? 'Repositionnement...' : 'Repartir depuis cette étape'}
+              </Button>
+            )}
             {deliverable?.pageHref && (
               <Link href={deliverable.pageHref} className="inline-flex">
                 <Button variant={selectedStatus === 'running' ? 'default' : 'outline'} size="sm">
@@ -367,6 +517,12 @@ export default function RunPage() {
               <Button variant="outline" size="sm">Réunion</Button>
             </Link>
           </div>
+
+          {runNotice && (
+            <div className="rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+              {runNotice}
+            </div>
+          )}
 
           {deliverableNotice && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">

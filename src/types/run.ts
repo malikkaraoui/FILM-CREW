@@ -1,3 +1,10 @@
+export type MeetingLlmMode = 'local' | 'cloud'
+
+export type ProjectConfig = {
+  meetingLlmMode: MeetingLlmMode
+  meetingLlmModel: string
+}
+
 export type Run = {
   id: string
   chainId: string | null
@@ -10,6 +17,7 @@ export type Run = {
   lastHeartbeat: Date | null
   createdAt: Date | null
   updatedAt: Date | null
+  projectConfig?: ProjectConfig | null
 }
 
 export type RunStep = {

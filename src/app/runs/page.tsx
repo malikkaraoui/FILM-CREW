@@ -5,23 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import type { Run } from '@/types/run'
 import type { Chain } from '@/types/chain'
-import { formatPipelineStepLabel } from '@/lib/pipeline/constants'
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'En attente',
-  running: 'En cours',
-  completed: 'Terminé',
-  failed: 'Échoué',
-  killed: 'Arrêté',
-}
-
-const STATUS_CLASSES: Record<string, string> = {
-  pending: 'text-amber-500',
-  running: 'text-blue-500',
-  completed: 'text-green-600',
-  failed: 'text-red-500',
-  killed: 'text-muted-foreground',
-}
+import { getProjectStatusClass, getProjectStatusLabel, getRunLandingHref, getRunStepLabel } from '@/lib/runs/presentation'
 
 export default function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([])
@@ -40,24 +24,30 @@ export default function RunsPage() {
   const chainMap = Object.fromEntries(chains.map((c) => [c.id, c]))
 
   return (
-    <div>
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Runs</h1>
+        <div>
+          <h1 className="text-xl font-semibold">Projets</h1>
+          <p className="text-sm text-muted-foreground">
+            Vue globale des projets, de leur étape courante et de leur historique.
+          </p>
+        </div>
         <Link href="/runs/new">
-          <Button>Nouveau run</Button>
+          <Button>Nouveau projet</Button>
         </Link>
       </div>
 
       {runs.length === 0 ? (
         <p className="mt-4 text-sm text-muted-foreground">
-          Aucun run. Lancez votre première production.
+          Aucun projet. Crée ton premier projet depuis une chaîne ou depuis cette page.
         </p>
       ) : (
         <table className="mt-4 w-full text-sm">
           <thead>
             <tr className="border-b text-left text-muted-foreground">
-              <th className="py-2 font-medium">Idée</th>
+              <th className="py-2 font-medium">Projet</th>
               <th className="py-2 font-medium">Chaîne</th>
+              <th className="py-2 font-medium">Étape</th>
               <th className="py-2 font-medium">Statut</th>
               <th className="py-2 font-medium">Coût</th>
               <th className="py-2 font-medium">Date</th>
@@ -67,7 +57,7 @@ export default function RunsPage() {
             {runs.map((r) => (
               <tr key={r.id} className="border-b hover:bg-accent/30">
                 <td className="py-2">
-                  <Link href={`/runs/${r.id}`} className="hover:underline">
+                  <Link href={getRunLandingHref(r)} className="font-medium hover:underline">
                     {r.idea}
                   </Link>
                 </td>
@@ -77,11 +67,12 @@ export default function RunsPage() {
                     : <span className="text-xs">{r.chainId ? `${r.chainId.slice(0, 8)}…` : 'Sans chaîne'}</span>
                   }
                 </td>
+                <td className="py-2 text-muted-foreground">
+                  {getRunStepLabel(r)}
+                </td>
                 <td className="py-2">
-                  <span className={`font-medium ${STATUS_CLASSES[r.status] ?? ''}`}>
-                    {r.status === 'running' && r.currentStep
-                      ? formatPipelineStepLabel(r.currentStep)
-                      : (STATUS_LABELS[r.status] ?? r.status)}
+                  <span className={`font-medium ${getProjectStatusClass(r.status)}`}>
+                    {getProjectStatusLabel(r)}
                   </span>
                 </td>
                 <td className="py-2 font-mono">{(r.costEur ?? 0).toFixed(2)} €</td>

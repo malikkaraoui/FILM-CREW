@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
-import { getRuns, createRun, getActiveRun } from '@/lib/db/queries/runs'
+import { getRuns, createRun, getRunningRun } from '@/lib/db/queries/runs'
 import { executePipeline } from '@/lib/pipeline/engine'
 import { logger } from '@/lib/logger'
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { buildIntentionPrefix } from '@/lib/intention/schema'
+import { writeProjectConfig } from '@/lib/runs/project-config'
 
 export async function GET() {
   try {
@@ -20,8 +21,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    // Vérifier qu'aucun run n'est en cours (sériel V1)
-    const active = await getActiveRun()
+    // Vérifier qu'aucun run n'est déjà en exécution
+    const active = await getRunningRun()
     if (active) {
       return NextResponse.json(
         { error: { code: 'RUN_ACTIVE', message: 'Un run est déjà en cours — attendez qu\'il se termine ou arrêtez-le' } },
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { chainId, idea, template, type, intention } = body
+  const { chainId, idea, template, type, intention, meetingLlmMode, meetingLlmModel, autoStart } = body
 
     if (!chainId || !idea) {
       return NextResponse.json(
@@ -50,6 +51,11 @@ export async function POST(request: Request) {
     await mkdir(join(runPath, 'storyboard'), { recursive: true })
     await mkdir(join(runPath, 'final'), { recursive: true })
 
+    const projectConfig = await writeProjectConfig(runPath, {
+      meetingLlmMode,
+      meetingLlmModel,
+    })
+
     // Persister intention.json si le questionnaire a été rempli
     if (intention && typeof intention === 'object' && Object.keys(intention).length > 0) {
       const intentionData = {
@@ -64,12 +70,13 @@ export async function POST(request: Request) {
       logger.info({ event: 'intention_saved', runId: id, answeredCount: Object.keys(intention).length })
     }
 
-    // Fire-and-forget : le pipeline tourne en arrière-plan dans le process Node.js
-    executePipeline(id).catch((e) => {
-      logger.error({ event: 'pipeline_crash', runId: id, error: (e as Error).message })
-    })
+    if (autoStart !== false) {
+      executePipeline(id, { mode: 'continuous' }).catch((e) => {
+        logger.error({ event: 'pipeline_crash', runId: id, error: (e as Error).message })
+      })
+    }
 
-    return NextResponse.json({ data: newRun }, { status: 201 })
+    return NextResponse.json({ data: { ...newRun, projectConfig } }, { status: 201 })
   } catch (e) {
     return NextResponse.json(
       { error: { code: 'DB_ERROR', message: (e as Error).message } },

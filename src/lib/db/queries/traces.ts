@@ -29,3 +29,7 @@ export async function getAgentTracesByAgent(runId: string, agentName: string) {
     .orderBy(agentTrace.createdAt)
     .then((rows) => rows.filter((r) => r.agentName === agentName))
 }
+
+export async function deleteAgentTraces(runId: string) {
+  await db.delete(agentTrace).where(eq(agentTrace.runId, runId))
+}

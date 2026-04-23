@@ -9,6 +9,7 @@ import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { INTENTION_BLOCS, getVisibleQuestions } from '@/lib/intention/schema'
 import type { Chain } from '@/types/chain'
+import type { MeetingLlmMode } from '@/types/run'
 
 type CostBreakdown = {
   step: string
@@ -23,6 +24,9 @@ type CostEstimate = {
   warning: string | null
 }
 
+const DEFAULT_LOCAL_MODEL = 'mistral:latest'
+const DEFAULT_CLOUD_MODEL = 'gemma4:31b-cloud'
+
 function NewRunForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -35,6 +39,11 @@ function NewRunForm() {
   const [loadingEstimate, setLoadingEstimate] = useState(true)
   const [templates, setTemplates] = useState<{ id: string; name: string; description: string }[]>([])
   const [templateId, setTemplateId] = useState('')
+  const [meetingMode, setMeetingMode] = useState<MeetingLlmMode>('local')
+  const [localModels, setLocalModels] = useState<string[]>([])
+  const [localModelsError, setLocalModelsError] = useState('')
+  const [meetingLocalModel, setMeetingLocalModel] = useState(DEFAULT_LOCAL_MODEL)
+  const [meetingCloudModel, setMeetingCloudModel] = useState(DEFAULT_CLOUD_MODEL)
 
   // Questionnaire adaptatif
   const [showQuestionnaire, setShowQuestionnaire] = useState(false)
@@ -69,6 +78,20 @@ function NewRunForm() {
       .then((json) => {
         if (json.data) setTemplates(json.data)
       })
+
+    fetch('/api/test/ollama-models')
+      .then((r) => r.json())
+      .then((json) => {
+        const models = Array.isArray(json.models) ? json.models as string[] : []
+        setLocalModels(models)
+        if (models.length > 0) {
+          setMeetingLocalModel((current) => models.includes(current) ? current : models[0])
+        }
+        if (json.error) setLocalModelsError(json.error)
+      })
+      .catch(() => {
+        setLocalModelsError('Impossible de lister les modèles Ollama locaux')
+      })
   }, [searchParams])
 
   const handleAnswer = useCallback((questionId: string, value: string) => {
@@ -77,6 +100,9 @@ function NewRunForm() {
 
   const answeredCount = Object.keys(answers).length
   const visibleQuestions = getVisibleQuestions(answers)
+  const selectedMeetingModel = meetingMode === 'cloud'
+    ? meetingCloudModel.trim()
+    : meetingLocalModel.trim()
 
   async function handleLaunch() {
     if (!chainId || !idea.trim()) return
@@ -87,6 +113,9 @@ function NewRunForm() {
       chainId,
       idea: idea.trim(),
       template: templateId || undefined,
+      autoStart: false,
+      meetingLlmMode: meetingMode,
+      meetingLlmModel: selectedMeetingModel,
     }
 
     if (showQuestionnaire && answeredCount > 0) {
@@ -111,7 +140,7 @@ function NewRunForm() {
 
   return (
     <div className="max-w-lg">
-      <h1 className="text-xl font-semibold">Nouveau run</h1>
+      <h1 className="text-xl font-semibold">Nouveau projet</h1>
 
       <div className="mt-4 flex flex-col gap-4">
         <div>
@@ -137,6 +166,70 @@ function NewRunForm() {
             placeholder="La polémique Mbappé expliquée en 90 secondes"
           />
         </div>
+
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm font-medium">Réunion LLM</CardTitle>
+            <div className="space-y-3 text-sm">
+              <div>
+                <Label htmlFor="meeting-mode">Mode</Label>
+                <select
+                  id="meeting-mode"
+                  value={meetingMode}
+                  onChange={(e) => setMeetingMode(e.target.value as MeetingLlmMode)}
+                  className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                >
+                  <option value="local">Local via Ollama (sur ce Mac)</option>
+                  <option value="cloud">Cloud via Ollama</option>
+                </select>
+              </div>
+
+              {meetingMode === 'local' ? (
+                <div>
+                  <Label htmlFor="meeting-local-model">Modèle local</Label>
+                  {localModels.length > 0 ? (
+                    <select
+                      id="meeting-local-model"
+                      value={meetingLocalModel}
+                      onChange={(e) => setMeetingLocalModel(e.target.value)}
+                      className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                    >
+                      {localModels.map((model) => (
+                        <option key={model} value={model}>{model}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input
+                      id="meeting-local-model"
+                      value={meetingLocalModel}
+                      onChange={(e) => setMeetingLocalModel(e.target.value)}
+                      placeholder="qwen2.5:7b"
+                    />
+                  )}
+                  {localModelsError && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      {localModelsError}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <Label htmlFor="meeting-cloud-model">Modèle cloud</Label>
+                  <Input
+                    id="meeting-cloud-model"
+                    value={meetingCloudModel}
+                    onChange={(e) => setMeetingCloudModel(e.target.value)}
+                    placeholder="gemma4:31b-cloud"
+                  />
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                Rien ne part automatiquement : tu crées d’abord le projet, puis tu lances l’étape 1 manuellement depuis la page projet.
+              </p>
+            </div>
+          </CardHeader>
+        </Card>
 
         {/* Template de style */}
         {templates.length > 0 && (
@@ -283,8 +376,8 @@ function NewRunForm() {
           </div>
         )}
 
-        <Button onClick={handleLaunch} disabled={launching || !chainId || !idea.trim()}>
-          {launching ? 'Lancement...' : 'Lancer'}
+        <Button onClick={handleLaunch} disabled={launching || !chainId || !idea.trim() || !selectedMeetingModel}>
+          {launching ? 'Création...' : 'Créer le projet'}
         </Button>
       </div>
     </div>

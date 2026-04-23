@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { NextResponse } from 'next/server'
+import { getRunSteps } from '@/lib/db/queries/runs'
 
 type DeliverableConfig = {
   title: string
@@ -84,6 +85,9 @@ function summarize(stepNumber: number, content: string | null): string {
 
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>
+    if (stepNumber === 1 && typeof parsed.idea === 'string') {
+      return `Idée de travail prête${parsed.hasIntention ? ' avec questionnaire' : ''}.`
+    }
     if (stepNumber === 2 && Array.isArray(parsed.sections)) {
       return `${parsed.sections.length} section(s) de brief disponibles.`
     }
@@ -136,6 +140,14 @@ export async function GET(
       content = await readFile(config.filePath, 'utf-8')
     } catch {
       content = null
+    }
+  }
+
+  if (content === null && step === 1) {
+    const steps = await getRunSteps(id)
+    const stepOne = steps.find((entry) => entry.stepNumber === 1)
+    if (stepOne?.outputData != null) {
+      content = JSON.stringify(stepOne.outputData, null, 2)
     }
   }
 

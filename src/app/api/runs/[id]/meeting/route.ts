@@ -6,6 +6,7 @@ import { getAgentTraces } from '@/lib/db/queries/traces'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { logger } from '@/lib/logger'
+import { readProjectConfig } from '@/lib/runs/project-config'
 
 export async function POST(
   _request: Request,
@@ -47,10 +48,14 @@ export async function POST(
       }
     }
 
+    const projectConfig = await readProjectConfig(join(process.cwd(), 'storage', 'runs', id))
+
     const coordinator = new MeetingCoordinator({
       runId: id,
       idea: run.idea,
       brandKit,
+      meetingLlmMode: projectConfig?.meetingLlmMode,
+      meetingLlmModel: projectConfig?.meetingLlmModel,
     })
 
     const brief = await coordinator.runMeeting()

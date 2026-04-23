@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
-import { createRun, getActiveRun } from '@/lib/db/queries/runs'
+import { createRun, getRunningRun } from '@/lib/db/queries/runs'
 import { executePipeline } from '@/lib/pipeline/engine'
 import { logger } from '@/lib/logger'
 import type { ViralManifest, ViralSegment } from '@/lib/viral/viral-types'
@@ -73,7 +73,7 @@ export async function POST(
       )
     }
 
-    const active = await getActiveRun()
+    const active = await getRunningRun()
     if (active) {
       return NextResponse.json(
         { error: { code: 'RUN_ACTIVE', message: 'Un run est déjà en cours — attendez qu\'il se termine' } },
@@ -120,7 +120,7 @@ export async function POST(
     logger.info({ event: 'viral_run_created', viralId, runId, segmentIndex, idea })
 
     // Lancer le pipeline en fire-and-forget
-    executePipeline(runId).catch((e) => {
+    executePipeline(runId, { mode: 'continuous' }).catch((e) => {
       logger.error({ event: 'viral_pipeline_crash', runId, error: (e as Error).message })
     })
 

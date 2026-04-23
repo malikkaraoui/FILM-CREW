@@ -3,6 +3,7 @@ import { getRunById, getRunSteps, deleteRun } from '@/lib/db/queries/runs'
 import { rm } from 'fs/promises'
 import { join } from 'path'
 import { logger } from '@/lib/logger'
+import { readProjectConfig } from '@/lib/runs/project-config'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -15,7 +16,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       )
     }
     const steps = await getRunSteps(id)
-    return NextResponse.json({ data: { ...r, steps } })
+    const storagePath = join(process.cwd(), 'storage', 'runs', id)
+    const projectConfig = await readProjectConfig(storagePath)
+    return NextResponse.json({ data: { ...r, steps, projectConfig } })
   } catch (e) {
     return NextResponse.json(
       { error: { code: 'DB_ERROR', message: (e as Error).message } },

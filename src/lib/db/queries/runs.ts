@@ -1,6 +1,6 @@
 import { db } from '../connection'
-import { run, runStep } from '../schema'
-import { eq, desc, or, inArray, and, lt, isNull } from 'drizzle-orm'
+import { run, runStep, clip } from '../schema'
+import { eq, desc, or, inArray, and, lt, isNull, gte } from 'drizzle-orm'
 import { PIPELINE_STEP_NAMES } from '@/lib/pipeline/constants'
 
 export async function getRuns() {
@@ -20,6 +20,11 @@ export async function getActiveRun() {
   const rows = await db.select().from(run).where(
     or(eq(run.status, 'running'), eq(run.status, 'pending'))
   )
+  return rows[0] ?? null
+}
+
+export async function getRunningRun() {
+  const rows = await db.select().from(run).where(eq(run.status, 'running'))
   return rows[0] ?? null
 }
 
@@ -67,6 +72,26 @@ export async function updateRunCost(id: string, costEur: number) {
     .where(eq(run.id, id))
     .returning()
   return row
+}
+
+export async function resetRunStepsFromStep(runId: string, stepNumber: number) {
+  await db
+    .update(runStep)
+    .set({
+      status: 'pending',
+      providerUsed: null,
+      costEur: 0,
+      inputData: null,
+      outputData: null,
+      startedAt: null,
+      completedAt: null,
+      error: null,
+    })
+    .where(and(eq(runStep.runId, runId), gte(runStep.stepNumber, stepNumber)))
+}
+
+export async function deleteClipsForRun(runId: string) {
+  await db.delete(clip).where(eq(clip.runId, runId))
 }
 
 export async function deleteRun(id: string) {

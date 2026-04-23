@@ -6,6 +6,7 @@ import { executeWithFailover } from '@/lib/providers/failover'
 import type { LLMProvider } from '@/lib/providers/types'
 import { logger } from '@/lib/logger'
 import type { AgentMessage, AgentRole, MeetingBrief, MeetingSceneOutlineItem } from '@/types/agent'
+import type { MeetingLlmMode } from '@/types/run'
 import type { StyleTemplate } from '@/lib/templates/loader'
 
 const MEETING_TRANSCRIPT_MAX_CHARS = 2000
@@ -99,6 +100,8 @@ export class MeetingCoordinator {
   private idea: string
   private brandKit: string | null
   private template: StyleTemplate | null
+  private meetingLlmMode: MeetingLlmMode
+  private meetingLlmModel: string | null
   private onMessage?: (message: AgentMessage) => void
 
   constructor(opts: {
@@ -106,12 +109,16 @@ export class MeetingCoordinator {
     idea: string
     brandKit?: string | null
     template?: StyleTemplate | null
+    meetingLlmMode?: MeetingLlmMode
+    meetingLlmModel?: string | null
     onMessage?: (message: AgentMessage) => void
   }) {
     this.runId = opts.runId
     this.idea = opts.idea
     this.brandKit = opts.brandKit ?? null
     this.template = opts.template ?? null
+    this.meetingLlmMode = opts.meetingLlmMode ?? 'local'
+    this.meetingLlmModel = opts.meetingLlmModel?.trim() || null
     this.onMessage = opts.onMessage
 
     // Initialiser tous les agents
@@ -128,7 +135,13 @@ export class MeetingCoordinator {
    * Lance la réunion complète et retourne le brief final.
    */
   async runMeeting(): Promise<MeetingBrief> {
-    logger.info({ event: 'meeting_start', runId: this.runId, idea: this.idea })
+    logger.info({
+      event: 'meeting_start',
+      runId: this.runId,
+      idea: this.idea,
+      llmMode: this.meetingLlmMode,
+      llmModel: this.meetingLlmModel,
+    })
 
     let totalCost = 0
 
@@ -192,6 +205,7 @@ export class MeetingCoordinator {
       const agent = this.agents.get(role)!
       const section = await agent.writeBriefSection(transcript, this.runId, {
         timeoutMs: MEETING_LLM_TIMEOUT_MS,
+        model: this.meetingLlmModel ?? undefined,
       })
       await this.recordMessage(section)
       totalCost += section.metadata?.costEur ?? 0
@@ -251,7 +265,10 @@ export class MeetingCoordinator {
     opts: AgentSpeakOptions = {},
   ): Promise<AgentMessage> {
     const agent = this.agents.get(role)!
-    const message = await agent.speak(context, this.runId, opts)
+    const message = await agent.speak(context, this.runId, {
+      ...opts,
+      model: opts.model ?? this.meetingLlmModel ?? undefined,
+    })
     await this.recordMessage(message)
     return message
   }
@@ -349,6 +366,7 @@ export class MeetingCoordinator {
             },
           ],
           {
+            model: this.meetingLlmModel ?? undefined,
             temperature: 0.2,
             maxTokens: 2200,
             timeoutMs: MEETING_LLM_TIMEOUT_MS,

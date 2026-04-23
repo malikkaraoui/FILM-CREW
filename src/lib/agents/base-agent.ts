@@ -10,6 +10,7 @@ export type AgentSpeakOptions = {
   maxTokens?: number
   timeoutMs?: number
   resetHistory?: boolean
+  model?: string
 }
 
 export class BaseAgent {
@@ -48,6 +49,7 @@ export class BaseAgent {
           temperature: opts.temperature ?? 0.8,
           maxTokens: opts.maxTokens ?? 512,
           timeoutMs: opts.timeoutMs,
+          model: opts.model,
         })
       },
       runId,
@@ -101,7 +103,7 @@ export class BaseAgent {
   async writeBriefSection(
     meetingTranscript: string,
     runId: string,
-    opts: Pick<AgentSpeakOptions, 'timeoutMs'> = {},
+    opts: Pick<AgentSpeakOptions, 'timeoutMs' | 'model'> = {},
   ): Promise<AgentMessage> {
     // Réinitialiser l'historique pour rester dans la fenêtre de contexte.
     // Le transcript complet est passé directement dans le prompt.
@@ -112,6 +114,7 @@ export class BaseAgent {
     const message = await this.speak(prompt, runId, {
       resetHistory: true,
       timeoutMs: opts.timeoutMs,
+      model: opts.model,
     })
     message.messageType = 'brief_section'
     return message
