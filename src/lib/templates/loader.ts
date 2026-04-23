@@ -12,6 +12,18 @@ export type StyleTemplate = {
   subtitleStyle: string
   agentTones: Record<string, string>
   promptPrefix: string
+  // Champs additifs pour le rendu preview (n'affectent PAS transitions/subtitleStyle existants)
+  previewTransition?: string
+  previewTransitionDuration?: number
+  previewSubtitleStyle?: {
+    fontName?: string
+    fontSize?: number
+    primaryColor?: string   // format ASS: '&H00FFFFFF'
+    outlineColor?: string
+    outlineWidth?: number
+    bold?: boolean
+    marginBottom?: number
+  }
 }
 
 const TEMPLATES_DIR = join(process.cwd(), 'templates')
