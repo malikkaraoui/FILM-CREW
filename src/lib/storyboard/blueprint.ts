@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises'
 import { join } from 'path'
 import type { StoryboardCloudPlanLike } from '@/lib/providers/image/storyboard-local'
 import type { DirectorPlan } from '@/lib/pipeline/steps/step-3-json'
+import type { MeetingSceneOutlineItem } from '@/types/agent'
 
 export type StructuredStoryScene = {
   index: number
@@ -28,6 +29,7 @@ export type BriefDocument = {
     title?: string
     content: string
   }>
+  sceneOutline?: MeetingSceneOutlineItem[]
 }
 
 export type StoryboardBlueprintScene = StoryboardCloudPlanLike & {

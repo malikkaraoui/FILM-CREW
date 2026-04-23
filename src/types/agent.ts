@@ -31,6 +31,18 @@ export type AgentMessage = {
   createdAt: string
 }
 
+export type MeetingSceneOutlineItem = {
+  index: number
+  title: string
+  description: string
+  dialogue: string
+  camera: string
+  lighting: string
+  duration_s: number
+  emotion?: string
+  narrativeRole?: string
+}
+
 export type MeetingBrief = {
   runId: string
   idea: string
@@ -40,6 +52,7 @@ export type MeetingBrief = {
     content: string
   }[]
   summary: string
+  sceneOutline?: MeetingSceneOutlineItem[]
   estimatedBudget: string
   validatedBy: string
   createdAt: string

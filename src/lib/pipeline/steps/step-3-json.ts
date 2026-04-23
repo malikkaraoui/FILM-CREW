@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { executeWithFailover } from '@/lib/providers/failover'
 import type { LLMProvider } from '@/lib/providers/types'
+import type { MeetingBrief, MeetingSceneOutlineItem } from '@/types/agent'
 import type { PipelineStep, StepContext, StepResult } from '../types'
 import { logger } from '@/lib/logger'
 
@@ -21,6 +22,74 @@ export type DirectorPlan = {
   generatedAt: string
 }
 
+type StructuredScene = {
+  index: number
+  description: string
+  dialogue: string
+  camera: string
+  lighting: string
+  duration_s: number
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function toText(value: unknown, fallback = ''): string {
+  return typeof value === 'string' && normalizeWhitespace(value) ? normalizeWhitespace(value) : fallback
+}
+
+function toPositiveInt(value: unknown, fallback = 5): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.round(value)
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.replace(/[^0-9]/g, ''), 10)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return fallback
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function buildSceneFromOutline(
+  outline: MeetingSceneOutlineItem,
+  candidate?: Record<string, unknown>,
+): StructuredScene {
+  return {
+    index: outline.index,
+    description: toText(candidate?.description, outline.description),
+    dialogue: toText(candidate?.dialogue, outline.dialogue),
+    camera: toText(candidate?.camera, outline.camera),
+    lighting: toText(candidate?.lighting, outline.lighting),
+    duration_s: toPositiveInt(candidate?.duration_s, outline.duration_s),
+  }
+}
+
+export function alignStructuredStoryToBriefOutline(
+  payload: Record<string, unknown>,
+  sceneOutline: MeetingSceneOutlineItem[],
+): Record<string, unknown> {
+  if (sceneOutline.length === 0) return payload
+
+  const rawScenes = Array.isArray(payload.scenes) ? payload.scenes.map(asRecord) : []
+  const alignedScenes = sceneOutline.map((outline, index) => {
+    const byIndex = rawScenes.find((scene) => toPositiveInt(scene.index, -1) === outline.index)
+    const fallback = rawScenes[index]
+    return buildSceneFromOutline(outline, byIndex ?? fallback)
+  })
+
+  const currentTarget = typeof payload.target_duration_s === 'number' && Number.isFinite(payload.target_duration_s)
+    ? payload.target_duration_s
+    : null
+
+  return {
+    ...payload,
+    scenes: alignedScenes,
+    target_duration_s: currentTarget ?? alignedScenes.reduce((sum, scene) => sum + scene.duration_s, 0),
+  }
+}
+
 export const step3Json: PipelineStep = {
   name: 'JSON structuré',
   stepNumber: 3,
@@ -28,17 +97,19 @@ export const step3Json: PipelineStep = {
   async execute(ctx: StepContext): Promise<StepResult> {
     // Lire le brief produit par la réunion d'agents (step 2)
     let briefContent: string | null = null
-    let brief: { sections?: { agent: string; title: string; content: string }[]; summary?: string } | null = null
+    let brief: MeetingBrief | null = null
     try {
       briefContent = await readFile(join(ctx.storagePath, 'brief.json'), 'utf-8')
-      brief = JSON.parse(briefContent)
+      brief = JSON.parse(briefContent) as MeetingBrief
     } catch {
       logger.warn({ event: 'brief_missing', runId: ctx.runId, fallback: 'ctx.idea' })
     }
 
+    const sceneOutline = brief?.sceneOutline ?? []
+
     // Construire le prompt utilisateur à partir du brief ou fallback sur l'idée brute
     const userContent = briefContent
-      ? `Brief de la réunion de production :\n\n${briefContent}\n\nTransforme ce brief en JSON structuré pour la production.`
+      ? `Brief de la réunion de production :\n\n${briefContent}\n\n${sceneOutline.length > 0 ? `Découpage canonique scene par scene issu du brief (obligatoire, a reprendre 1:1 sans fusion, sans suppression, sans reordering) :\n${JSON.stringify(sceneOutline, null, 2)}\n\n` : ''}Transforme ce brief en JSON structuré pour la production. L'étape 3 vient en complément du brief : elle le rend canonique et exploitable, elle ne le simplifie pas.`
       : `[FALLBACK — brief absent, idée brute uniquement]\n\nIdée : ${ctx.idea}\n\nTransforme en JSON structuré pour la production.`
 
     // Contexte template injecté dans le system prompt (10D)
@@ -73,6 +144,10 @@ Le JSON doit contenir :
   "tone": "ton émotionnel",
   "target_duration_s": 90
 }
+Règles importantes :
+- si le brief contient déjà un découpage scène par scène, reprends exactement ce nombre de scènes et le même ordre
+- l'étape 3 complète le brief, elle ne le résume pas
+- chaque scène doit rester fidèle au brief tout en devenant exploitable en production
 Retourne UNIQUEMENT le JSON, sans markdown ni explication.${templateContext}`,
             },
             {
@@ -106,6 +181,19 @@ Retourne UNIQUEMENT le JSON, sans markdown ni explication.${templateContext}`,
         outputData: { raw: result.content },
         error: `Parsing JSON échoué: ${(e as Error).message}. Réponse brute conservée dans structure-raw.txt`,
       }
+    }
+
+    const rawSceneCount = Array.isArray(parsed.scenes) ? parsed.scenes.length : 0
+    parsed = alignStructuredStoryToBriefOutline(parsed, sceneOutline)
+    const alignedSceneCount = Array.isArray(parsed.scenes) ? parsed.scenes.length : 0
+
+    if (sceneOutline.length > 0 && rawSceneCount !== alignedSceneCount) {
+      logger.warn({
+        event: 'step3_scene_outline_reapplied',
+        runId: ctx.runId,
+        rawSceneCount,
+        alignedSceneCount,
+      })
     }
 
     const outputPath = join(ctx.storagePath, 'structure.json')
@@ -163,6 +251,7 @@ Retourne UNIQUEMENT le JSON, sans markdown ni explication.${templateContext}`,
       costEur: result.costEur,
       outputData: {
         ...parsed,
+        sceneOutlineUsed: sceneOutline.length > 0,
         directorPlan: {
           tone,
           style,

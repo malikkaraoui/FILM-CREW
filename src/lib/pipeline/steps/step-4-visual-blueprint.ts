@@ -198,13 +198,27 @@ function buildUserPrompt(
   brief: BriefDocument | null,
   directorPlan: DirectorPlan | null,
 ): string {
+  const compactSceneOutline = brief?.sceneOutline
+    ? brief.sceneOutline.map((scene) => ({
+        index: scene.index,
+        title: scene.title,
+        description: scene.description,
+        dialogue: scene.dialogue,
+        camera: scene.camera,
+        lighting: scene.lighting,
+        duration_s: scene.duration_s,
+        emotion: scene.emotion,
+        narrativeRole: scene.narrativeRole,
+      }))
+    : null
+
   const compactBrief = brief
     ? {
         summary: brief.summary ?? '',
         sections: (brief.sections ?? []).map((section) => ({
           agent: section.agent,
           title: section.title ?? '',
-          content: section.content.slice(0, 280),
+          content: section.content.slice(0, 500),
         })),
       }
     : null
@@ -239,6 +253,9 @@ function buildUserPrompt(
     '',
     'brief_json:',
     JSON.stringify(compactBrief, null, 2),
+    '',
+    'brief_scene_outline_json:',
+    JSON.stringify(compactSceneOutline, null, 2),
     '',
     'structure_json:',
     JSON.stringify(compactStructure, null, 2),

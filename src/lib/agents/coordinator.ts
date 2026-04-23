@@ -2,12 +2,15 @@ import { BaseAgent, type AgentSpeakOptions } from './base-agent'
 import { AGENT_PROFILES, MEETING_ORDER } from './profiles'
 import { createAgentTrace } from '@/lib/db/queries/traces'
 import { updateRunCost } from '@/lib/db/queries/runs'
+import { executeWithFailover } from '@/lib/providers/failover'
+import type { LLMProvider } from '@/lib/providers/types'
 import { logger } from '@/lib/logger'
-import type { AgentMessage, AgentRole, MeetingBrief } from '@/types/agent'
+import type { AgentMessage, AgentRole, MeetingBrief, MeetingSceneOutlineItem } from '@/types/agent'
 import type { StyleTemplate } from '@/lib/templates/loader'
 
 const MEETING_TRANSCRIPT_MAX_CHARS = 2000
 const MEETING_LLM_TIMEOUT_MS = 180_000
+const SCENE_OUTLINE_TRANSCRIPT_MAX_CHARS = 3500
 
 function compactTranscriptForPrompt(transcript: string, maxChars = MEETING_TRANSCRIPT_MAX_CHARS): string {
   if (transcript.length <= maxChars) return transcript
@@ -18,6 +21,64 @@ function compactTranscriptForPrompt(transcript: string, maxChars = MEETING_TRANS
   const tail = transcript.slice(-tailChars)
 
   return `${head}\n\n[... transcript tronqué pour rester lisible et local-first ...]\n\n${tail}`
+}
+
+function extractJsonObject(content: string): Record<string, unknown> {
+  const trimmed = content.trim()
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const source = fenced?.[1]?.trim() || trimmed
+  const firstBrace = source.indexOf('{')
+  const lastBrace = source.lastIndexOf('}')
+
+  if (firstBrace < 0 || lastBrace <= firstBrace) {
+    throw new Error('Aucun objet JSON exploitable trouvé dans la synthèse scène par scène')
+  }
+
+  return JSON.parse(source.slice(firstBrace, lastBrace + 1)) as Record<string, unknown>
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function toText(value: unknown, fallback = ''): string {
+  return typeof value === 'string' && normalizeWhitespace(value) ? normalizeWhitespace(value) : fallback
+}
+
+function toDuration(value: unknown, fallback = 5): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.round(value)
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.replace(/[^0-9]/g, ''), 10)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return fallback
+}
+
+function normalizeSceneOutline(value: unknown): MeetingSceneOutlineItem[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((entry, index) => {
+      const raw = asRecord(entry)
+      const sceneIndex = toDuration(raw.index, index + 1)
+      return {
+        index: sceneIndex,
+        title: toText(raw.title, `Scène ${sceneIndex}`),
+        description: toText(raw.description, toText(raw.title, `Scène ${sceneIndex}`)),
+        dialogue: toText(raw.dialogue, ''),
+        camera: toText(raw.camera, 'plan simple'),
+        lighting: toText(raw.lighting, 'lumière naturelle'),
+        duration_s: toDuration(raw.duration_s, 5),
+        emotion: toText(raw.emotion) || undefined,
+        narrativeRole: toText(raw.narrativeRole) || undefined,
+      }
+    })
+    .filter((scene) => scene.description.length > 0)
+    .sort((a, b) => a.index - b.index)
 }
 
 /**
@@ -151,6 +212,17 @@ export class MeetingCoordinator {
     })
     totalCost += closing.metadata?.costEur ?? 0
 
+    let sceneOutline: MeetingSceneOutlineItem[] = []
+    try {
+      sceneOutline = await this.buildSceneOutline(fullTranscript, briefSections)
+    } catch (error) {
+      logger.warn({
+        event: 'meeting_scene_outline_missing',
+        runId: this.runId,
+        error: (error as Error).message,
+      })
+    }
+
     // Mettre à jour le coût du run
     await updateRunCost(this.runId, totalCost).catch(() => {})
 
@@ -166,6 +238,7 @@ export class MeetingCoordinator {
       idea: this.idea,
       sections: briefSections,
       summary: closing.content,
+      sceneOutline,
       estimatedBudget: `~${totalCost.toFixed(2)} € (réunion)`,
       validatedBy: 'mia',
       createdAt: new Date().toISOString(),
@@ -215,5 +288,83 @@ export class MeetingCoordinator {
 
   private getPromptTranscript(maxChars = MEETING_TRANSCRIPT_MAX_CHARS): string {
     return compactTranscriptForPrompt(this.formatTranscript(), maxChars)
+  }
+
+  private async buildSceneOutline(
+    transcript: string,
+    sections: MeetingBrief['sections'],
+  ): Promise<MeetingSceneOutlineItem[]> {
+    const compactTranscript = compactTranscriptForPrompt(transcript, SCENE_OUTLINE_TRANSCRIPT_MAX_CHARS)
+    const compactSections = sections.map((section) => ({
+      agent: section.agent,
+      title: section.title,
+      content: section.content.slice(0, 700),
+    }))
+
+    const { result } = await executeWithFailover(
+      'llm',
+      async (provider) => {
+        const llm = provider as LLMProvider
+        return llm.chat(
+          [
+            {
+              role: 'system',
+              content: [
+                'Tu transformes une reunion de production en sceneOutline canonique.',
+                'Retourne uniquement un JSON valide, sans markdown ni texte autour.',
+                'Schema attendu :',
+                '{',
+                '  "sceneOutline": [',
+                '    {',
+                '      "index": 1,',
+                '      "title": "titre court",',
+                '      "description": "ce qui doit etre montre dans la scene",',
+                '      "dialogue": "dialogue ou narration si disponible",',
+                '      "camera": "intention camera principale",',
+                '      "lighting": "intention lumiere",',
+                '      "duration_s": 5,',
+                '      "emotion": "emotion dominante",',
+                '      "narrativeRole": "role de la scene dans le recit"',
+                '    }',
+                '  ]',
+                '}',
+                'Règles :',
+                '- reprends le découpage scène par scène décidé par la réunion, sans fusion ni compression arbitraire',
+                '- si plusieurs scènes sont évoquées, conserve-les toutes dans l ordre',
+                '- chaque scène doit rester dessinable et exploitable ensuite par la prod',
+                '- camera et lighting doivent rester courts et concrets',
+              ].join('\n'),
+            },
+            {
+              role: 'user',
+              content: [
+                `Idée : ${this.idea}`,
+                '',
+                'Résumé et sections du brief :',
+                JSON.stringify(compactSections, null, 2),
+                '',
+                'Transcript compacté de la réunion :',
+                compactTranscript,
+              ].join('\n'),
+            },
+          ],
+          {
+            temperature: 0.2,
+            maxTokens: 2200,
+            timeoutMs: MEETING_LLM_TIMEOUT_MS,
+          },
+        )
+      },
+      this.runId,
+    )
+
+    const payload = extractJsonObject(result.content)
+    const sceneOutline = normalizeSceneOutline(payload.sceneOutline)
+
+    if (sceneOutline.length === 0) {
+      throw new Error('sceneOutline vide après synthèse réunion')
+    }
+
+    return sceneOutline
   }
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
+import { alignStructuredStoryToBriefOutline } from '../steps/step-3-json'
 
 const FIXTURE_DIR = join(__dirname, '__fixtures__')
 
@@ -27,6 +28,49 @@ describe('Chaîne critique — parsing et cohérence', () => {
       const raw = 'Voici ma réponse sans JSON valide'
       const match = raw.match(/\{[\s\S]*\}/)
       expect(match).toBeNull()
+    })
+
+    it('réapplique le découpage scène par scène du brief sans perte', () => {
+      const aligned = alignStructuredStoryToBriefOutline(
+        {
+          title: 'Test',
+          scenes: [
+            {
+              index: 1,
+              description: 'Scène 1 compressée',
+              dialogue: '',
+              camera: 'plan serré',
+              lighting: 'nuit',
+              duration_s: 6,
+            },
+          ],
+        },
+        [
+          {
+            index: 1,
+            title: 'Ouverture',
+            description: 'Chien se réveille sur la montagne',
+            dialogue: '',
+            camera: 'angle bas',
+            lighting: 'aube dorée',
+            duration_s: 5,
+          },
+          {
+            index: 2,
+            title: 'Exploration',
+            description: 'Chien commence à explorer la montagne',
+            dialogue: '',
+            camera: 'travelling lent',
+            lighting: 'lumière naturelle',
+            duration_s: 10,
+          },
+        ],
+      )
+
+      expect(Array.isArray(aligned.scenes)).toBe(true)
+      expect((aligned.scenes as unknown[])).toHaveLength(2)
+      expect((aligned.scenes as Array<{ index: number }>)[1].index).toBe(2)
+      expect((aligned.scenes as Array<{ description: string }>)[1].description).toContain('explorer la montagne')
     })
   })
 
