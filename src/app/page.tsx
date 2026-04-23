@@ -68,7 +68,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Tour de contrôle</h1>
+          <h1 className="text-xl font-semibold">Tableau de bord</h1>
           <p className="text-xs text-muted-foreground">
             {chains.length} chaîne{chains.length !== 1 ? 's' : ''} · {runs.length} run{runs.length !== 1 ? 's' : ''}
           </p>
@@ -141,9 +141,9 @@ export default function Dashboard() {
               const chainRuns = runs.filter((r) => r.chainId === c.id)
               const lastRun = chainRuns[0] ?? null
               return (
-                <Link key={c.id} href={`/chains/${c.id}`}>
-                  <Card className="cursor-pointer transition-colors hover:bg-accent/50">
-                    <CardHeader className="py-3">
+                <Link key={c.id} href={`/chains/${c.id}`} className="block h-full">
+                  <Card className="flex h-full min-h-[92px] cursor-pointer flex-col transition-colors hover:bg-accent/50">
+                    <CardHeader className="flex flex-1 justify-between py-3">
                       <CardTitle className="text-base">{c.name}</CardTitle>
                       <CardDescription className="flex items-center justify-between text-xs">
                         <span>{c.langSource.toUpperCase()}{c.audience && ` · ${c.audience}`}</span>
@@ -163,7 +163,7 @@ export default function Dashboard() {
       </div>
 
       {/* Derniers runs */}
-      <div>
+      <div className="border-t border-border/60 pt-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Derniers runs</h2>
           <Link href="/runs" className="text-xs text-muted-foreground hover:underline">Tous les runs</Link>
