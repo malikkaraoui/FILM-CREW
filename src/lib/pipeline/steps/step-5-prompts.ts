@@ -12,6 +12,12 @@ import {
 } from '@/lib/storyboard/blueprint'
 import { getStepLlmConfig, readProjectConfig } from '@/lib/runs/project-config'
 import { resolveLlmTarget } from '@/lib/llm/target'
+import {
+  buildProviderPromptVariants,
+  buildVideoPromptSystemRules,
+  resolveProviderPrompt,
+  type ProviderPromptMap,
+} from '@/lib/pipeline/provider-prompting'
 
 type BriefSceneOutlineItem = {
   index: number
@@ -21,6 +27,9 @@ type BriefSceneOutlineItem = {
   camera?: string
   lighting?: string
   duration_s?: number
+  foreground?: string
+  midground?: string
+  background?: string
   emotion?: string
   narrativeRole?: string
 }
@@ -35,6 +44,9 @@ type GeneratedPromptFields = {
   subject: string
   action: string
   environment: string
+  foreground: string
+  midground: string
+  background: string
   camera: string
   lighting: string
   motion: string
@@ -51,10 +63,14 @@ export type PromptManifestEntry = {
   sceneIndex: number
   prompt: string
   negativePrompt: string
+  providerPrompts?: ProviderPromptMap
   promptStructure?: {
     subject: string
     action: string
     environment: string
+    foreground: string
+    midground: string
+    background: string
     camera: string
     lighting: string
     motion: string
@@ -91,6 +107,7 @@ type NormalizedPromptEntry = {
   sceneIndex: number
   prompt: string
   negativePrompt: string
+  providerPrompts: ProviderPromptMap
   promptStructure: NonNullable<PromptManifestEntry['promptStructure']>
 }
 
@@ -107,6 +124,7 @@ export const step5Prompts: PipelineStep = {
     const projectConfig = await readProjectConfig(ctx.storagePath)
     const llmConfig = getStepLlmConfig(projectConfig, 6)
     const llmTarget = resolveLlmTarget(llmConfig?.mode ?? 'local', llmConfig?.model)
+    const referenceImageUrls = projectConfig?.referenceImages?.urls ?? []
 
     let structure: StructuredStoryDocument
     try {
@@ -167,17 +185,23 @@ RÈGLES IMPÉRATIVES :
 - une seule action principale ;
 - un seul mouvement caméra ;
 - lighting obligatoire ;
+- composition pensée nativement pour TikTok vertical 9:16 ;
+- environnement réel obligatoire avec profondeur lisible ;
+- décris explicitement foreground, midground, background ;
+- interdiction de fond studio, fond neutre, fond vide, fond seamless, cyclorama, sujet isolé hors contexte ;
 - pas de répétition inutile ;
 - pas d'abstraction vague type "beautiful cinematic masterpiece" ;
 - pas de contradictions ;
 - priorité absolue à la clarté de génération, pas au style rédactionnel ;
 - si une donnée de réunion/structure est forte, tu la gardes telle quelle.
 
+${buildVideoPromptSystemRules()}
+
 LONGUEUR CIBLE : 45 à 80 mots maximum pour le prompt final.
 NEGATIVE PROMPT : court, concret, anti-déchets visuels.
 
 Retourne UNIQUEMENT un JSON valide contenant pour chaque scène :
-sceneIndex, subject, action, environment, camera, lighting, motion, framing, mood, style, audio, dialogue, mustKeep, negativePrompt.
+sceneIndex, subject, action, environment, foreground, midground, background, camera, lighting, motion, framing, mood, style, audio, dialogue, mustKeep, negativePrompt.
 ${brandContext}${directorContext}${templateContext}`,
             },
             {
@@ -186,6 +210,7 @@ ${brandContext}${directorContext}${templateContext}`,
 ${JSON.stringify({
                 summary: brief?.summary ?? '',
                 sceneOutline: brief?.sceneOutline ?? [],
+                referenceImages: referenceImageUrls,
               }, null, 2)}
 
 Scènes source :
@@ -202,6 +227,9 @@ ${JSON.stringify(structure.scenes.map((scene) => {
                         dialogue: briefScene.dialogue,
                         camera: briefScene.camera,
                         lighting: briefScene.lighting,
+                        foreground: briefScene.foreground,
+                        midground: briefScene.midground,
+                        background: briefScene.background,
                         duration_s: briefScene.duration_s,
                         emotion: briefScene.emotion,
                         narrativeRole: briefScene.narrativeRole,
@@ -271,6 +299,7 @@ ${JSON.stringify(structure.scenes.map((scene) => {
         directorIntent: shotEntry?.intent ?? '',
         tone: directorPlan?.tone ?? structure.tone ?? '',
         style: directorPlan?.style ?? structure.style ?? '',
+        hasReferenceImage: referenceImageUrls.length > 0,
       })
     })
 
@@ -281,6 +310,7 @@ ${JSON.stringify(structure.scenes.map((scene) => {
           sceneIndex: entry.sceneIndex,
           prompt: entry.prompt,
           negativePrompt: entry.negativePrompt,
+          providerPrompts: entry.providerPrompts,
         })),
       }, null, 2),
     )
@@ -304,6 +334,7 @@ ${JSON.stringify(structure.scenes.map((scene) => {
           sceneIndex: entry.sceneIndex,
           prompt: entry.prompt,
           negativePrompt: entry.negativePrompt,
+          providerPrompts: entry.providerPrompts,
           promptStructure: entry.promptStructure,
           sources: {
             descriptionSnippet: blueprintScene?.childCaption?.slice(0, 80) ?? scene?.description?.slice(0, 80) ?? '',
@@ -430,6 +461,9 @@ function buildProfessionalPrompt(input: NormalizedPromptEntry['promptStructure']
   const parts = [
     compactParts([input.style, input.framing]),
     `${input.subject}, ${input.action}`,
+    `foreground: ${input.foreground}`,
+    `midground: ${input.midground}`,
+    `background: ${input.background}`,
     input.environment,
     compactParts([input.camera, input.motion]),
     input.lighting,
@@ -443,10 +477,37 @@ function buildProfessionalPrompt(input: NormalizedPromptEntry['promptStructure']
 }
 
 function buildFallbackNegativePrompt(sceneDescription: string): string {
-  const hints = ['cartoon', 'low detail', 'oversaturated', 'clean futuristic city', 'smiling heroic pose']
+  const hints = ['cartoon', 'low detail', 'oversaturated', 'clean futuristic city', 'smiling heroic pose', 'studio background', 'empty backdrop', 'seamless background', 'white cyclorama', 'gray studio floor', 'isolated product shot', 'landscape framing', 'horizontal composition']
   if (/night|nuit|brume|mist/i.test(sceneDescription)) hints.push('bright daylight')
   if (/war|guerre|soldat|robot/i.test(sceneDescription)) hints.push('comedic mood')
   return hints.join(', ')
+}
+
+function buildLayerFallback(args: {
+  rawValue: unknown
+  briefValue?: unknown
+  blueprintValue?: unknown
+  sceneDescription: string
+  label: 'foreground' | 'midground' | 'background'
+}): string {
+  const rawText = normalizeText(args.rawValue)
+  if (rawText) return rawText
+
+  const briefText = normalizeText(args.briefValue)
+  if (briefText) return briefText
+
+  const blueprintText = normalizeText(args.blueprintValue)
+  if (blueprintText) return blueprintText
+
+  if (args.label === 'foreground') {
+    return `grounded near-camera subject details tied to: ${normalizeText(args.sceneDescription) || 'the main action'}`
+  }
+
+  if (args.label === 'midground') {
+    return `action space with terrain, props, bodies or machinery tied to: ${normalizeText(args.sceneDescription) || 'the scene'}`
+  }
+
+  return `distant real background with depth, horizon, structures, smoke, weather or landscape tied to: ${normalizeText(args.sceneDescription) || 'the scene'}`
 }
 
 function normalizeGeneratedPrompt(args: {
@@ -457,8 +518,9 @@ function normalizeGeneratedPrompt(args: {
   directorIntent: string
   tone: string
   style: string
+  hasReferenceImage: boolean
 }): NormalizedPromptEntry {
-  const { raw, scene, blueprintScene, briefScene, directorIntent, tone, style } = args
+  const { raw, scene, blueprintScene, briefScene, directorIntent, tone, style, hasReferenceImage } = args
 
   const subject = normalizeText(raw.subject)
     || normalizeText(blueprintScene?.primarySubject)
@@ -476,6 +538,30 @@ function normalizeGeneratedPrompt(args: {
       briefScene?.narrativeRole,
       scene.description,
     ])
+
+  const foreground = buildLayerFallback({
+    rawValue: raw.foreground,
+    briefValue: briefScene?.foreground,
+    blueprintValue: blueprintScene?.primarySubject,
+    sceneDescription: scene.description,
+    label: 'foreground',
+  })
+
+  const midground = buildLayerFallback({
+    rawValue: raw.midground,
+    briefValue: briefScene?.midground,
+    blueprintValue: blueprintScene?.action,
+    sceneDescription: scene.description,
+    label: 'midground',
+  })
+
+  const background = buildLayerFallback({
+    rawValue: raw.background,
+    briefValue: briefScene?.background,
+    blueprintValue: blueprintScene?.background,
+    sceneDescription: scene.description,
+    label: 'background',
+  })
 
   const camera = normalizeText(raw.camera)
     || normalizeText(briefScene?.camera)
@@ -517,6 +603,9 @@ function normalizeGeneratedPrompt(args: {
     subject,
     action,
     environment,
+    foreground,
+    midground,
+    background,
     camera,
     lighting,
     motion,
@@ -528,10 +617,14 @@ function normalizeGeneratedPrompt(args: {
     mustKeep: mustKeep.length ? mustKeep : undefined,
   }
 
+  const providerPrompts = buildProviderPromptVariants(promptStructure, { hasReferenceImage })
+  const canonicalPrompt = buildProfessionalPrompt(promptStructure)
+
   return {
     sceneIndex: raw.sceneIndex,
-    prompt: buildProfessionalPrompt(promptStructure),
+    prompt: resolveProviderPrompt(providerPrompts, 'happyhorse', canonicalPrompt),
     negativePrompt,
+    providerPrompts,
     promptStructure,
   }
 }

@@ -39,6 +39,9 @@ export type MeetingSceneOutlineItem = {
   camera: string
   lighting: string
   duration_s: number
+  foreground?: string
+  midground?: string
+  background?: string
   emotion?: string
   narrativeRole?: string
 }

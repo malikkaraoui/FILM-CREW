@@ -8,11 +8,14 @@ import { logger } from '@/lib/logger'
 import type { PipelineStep, StepContext, StepResult } from '../types'
 import { readProjectConfig } from '@/lib/runs/project-config'
 import { pickBackgroundMusic } from '@/lib/providers/music/local-music'
+import type { ProviderPromptMap } from '@/lib/pipeline/provider-prompting'
+import { resolveProviderPrompt } from '@/lib/pipeline/provider-prompting'
 
 type PromptEntry = {
   sceneIndex: number
   prompt: string
   negativePrompt?: string
+  providerPrompts?: ProviderPromptMap
 }
 
 export const step6Generation: PipelineStep = {
@@ -87,7 +90,8 @@ export const step6Generation: PipelineStep = {
             if (video.name === 'sketch-local') {
               throw new Error('sketch-local est désactivé pour le pipeline standard : brouillon texte local non acceptable comme clip final')
             }
-            return video.generate(entry.prompt, {
+            const resolvedPrompt = resolveProviderPrompt(entry.providerPrompts, video.name, entry.prompt)
+            return video.generate(resolvedPrompt, {
               resolution: '720p',
               duration: 10,
               aspectRatio: '9:16',
@@ -105,7 +109,7 @@ export const step6Generation: PipelineStep = {
           id: crypto.randomUUID(),
           runId: ctx.runId,
           stepIndex: entry.sceneIndex,
-          prompt: entry.prompt,
+          prompt: resolveProviderPrompt(entry.providerPrompts, provider.name, entry.prompt),
           provider: provider.name,
           status: 'completed',
           filePath: result.filePath,

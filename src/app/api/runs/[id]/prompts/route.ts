@@ -1,11 +1,14 @@
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { NextResponse } from 'next/server'
+import type { ProviderPromptMap } from '@/lib/pipeline/provider-prompting'
+import { buildManualOverrideProviderPrompts } from '@/lib/pipeline/provider-prompting'
 
 type PromptEntry = {
   sceneIndex: number
   prompt: string
   negativePrompt?: string
+  providerPrompts?: ProviderPromptMap
 }
 
 function getPaths(runId: string) {
@@ -86,6 +89,7 @@ export async function PATCH(
   }
 
   prompt.prompt = body.prompt
+  prompt.providerPrompts = buildManualOverrideProviderPrompts(body.prompt)
   if (body.negativePrompt !== undefined) {
     prompt.negativePrompt = body.negativePrompt
   }
@@ -96,6 +100,7 @@ export async function PATCH(
     const manifestPrompt = manifestRaw.prompts?.find((item) => item.sceneIndex === body.sceneIndex)
     if (manifestPrompt) {
       manifestPrompt.prompt = body.prompt
+      manifestPrompt.providerPrompts = buildManualOverrideProviderPrompts(body.prompt)
       if (body.negativePrompt !== undefined) {
         manifestPrompt.negativePrompt = body.negativePrompt
       }

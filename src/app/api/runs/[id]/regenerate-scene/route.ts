@@ -16,6 +16,8 @@ import type { VideoProvider } from '@/lib/providers/types'
 import { logger } from '@/lib/logger'
 import { getBlueprintScene, readStoryboardBlueprint } from '@/lib/storyboard/blueprint'
 import { readProjectConfig } from '@/lib/runs/project-config'
+import type { ProviderPromptMap } from '@/lib/pipeline/provider-prompting'
+import { buildManualOverrideProviderPrompts, resolveProviderPrompt } from '@/lib/pipeline/provider-prompting'
 
 /**
  * POST /api/runs/[id]/regenerate-scene
@@ -304,7 +306,7 @@ async function regenerateVideoScene(
   const referenceImageUrls = projectConfig?.referenceImages?.urls ?? []
 
   // Lire prompts.json pour récupérer le prompt de la scène
-  let promptData: { prompts: { sceneIndex: number; prompt: string; negativePrompt?: string }[] }
+  let promptData: { prompts: { sceneIndex: number; prompt: string; negativePrompt?: string; providerPrompts?: ProviderPromptMap }[] }
   try {
     promptData = JSON.parse(await readFile(join(storagePath, 'prompts.json'), 'utf-8'))
   } catch {
@@ -324,6 +326,7 @@ async function regenerateVideoScene(
 
   if (customPrompt?.trim()) {
     entry.prompt = customPrompt.trim()
+    entry.providerPrompts = buildManualOverrideProviderPrompts(entry.prompt)
   }
   if (customNegativePrompt !== undefined) {
     entry.negativePrompt = customNegativePrompt
@@ -333,11 +336,14 @@ async function regenerateVideoScene(
   try {
     const promptManifestPath = join(storagePath, 'prompt-manifest.json')
     const promptManifest = JSON.parse(await readFile(promptManifestPath, 'utf-8')) as {
-      prompts?: Array<{ sceneIndex: number; prompt: string; negativePrompt?: string }>
+      prompts?: Array<{ sceneIndex: number; prompt: string; negativePrompt?: string; providerPrompts?: ProviderPromptMap }>
     }
     const manifestEntry = promptManifest.prompts?.find((p) => p.sceneIndex === sceneIndex)
     if (manifestEntry) {
       manifestEntry.prompt = entry.prompt
+      if (customPrompt?.trim()) {
+        manifestEntry.providerPrompts = buildManualOverrideProviderPrompts(entry.prompt)
+      }
       if (customNegativePrompt !== undefined) {
         manifestEntry.negativePrompt = customNegativePrompt
       }
@@ -371,7 +377,7 @@ async function regenerateVideoScene(
         if (video.name === 'sketch-local') {
           throw new Error('sketch-local est désactivé pour le pipeline standard : brouillon texte local non acceptable comme clip final')
         }
-        return video.generate(entry.prompt, {
+        return video.generate(resolveProviderPrompt(entry.providerPrompts, video.name, entry.prompt), {
           resolution: '720p',
           duration: 10,
           aspectRatio: '9:16',
@@ -394,7 +400,7 @@ async function regenerateVideoScene(
       id: crypto.randomUUID(),
       runId,
       stepIndex: sceneIndex,
-      prompt: entry.prompt,
+      prompt: resolveProviderPrompt(entry.providerPrompts, provider.name, entry.prompt),
       provider: provider.name,
       status: 'completed',
       filePath: result.filePath,

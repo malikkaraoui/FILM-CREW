@@ -75,6 +75,9 @@ function normalizeSceneOutline(value: unknown): MeetingSceneOutlineItem[] {
         camera: toText(raw.camera, 'plan simple'),
         lighting: toText(raw.lighting, 'lumière naturelle'),
         duration_s: toDuration(raw.duration_s, 5),
+        foreground: toText(raw.foreground) || undefined,
+        midground: toText(raw.midground) || undefined,
+        background: toText(raw.background) || undefined,
         emotion: toText(raw.emotion) || undefined,
         narrativeRole: toText(raw.narrativeRole) || undefined,
       }
@@ -122,6 +125,17 @@ function buildReferenceImagesDirective(referenceImages: ReferenceImageConfig | n
     '- considère ces images/URLs dès maintenant dans ton analyse',
     '- cite les inspirations utiles si elles orientent le ton, le look, le décor, le personnage ou le cadrage',
     '- propose des idées compatibles avec ces références sans les recopier plan par plan',
+  ].join('\n')
+}
+
+function buildVisualSafetyDirective(): string {
+  return [
+    'Consigne visuelle non négociable :',
+    '- aucune scène ne doit ressembler à un sujet isolé sur fond studio, fond blanc, fond gris, fond noir ou fond seamless',
+    '- chaque scène doit décrire un vrai décor avec profondeur lisible',
+    '- précise toujours ce qu on voit au premier plan, au plan intermédiaire et à l arrière-plan',
+    '- compose chaque scène pour un rendu vertical TikTok 9:16 : sujet lisible, composition verticale stable, aucun cadrage pensé paysage',
+    '- si une image de référence montre un objet isolé, réinterprète-la dans un décor réel cohérent au lieu de reprendre son fond neutre',
   ].join('\n')
 }
 
@@ -227,9 +241,10 @@ export class MeetingCoordinator {
     const outputLockContext = this.outputConfig ? `\n\n${buildOutputLockContext(this.outputConfig)}` : ''
     const referenceImagesContext = this.referenceImages ? `\n\n${buildReferenceImagesContext(this.referenceImages)}` : ''
     const referenceImagesDirective = buildReferenceImagesDirective(this.referenceImages)
+    const visualSafetyDirective = buildVisualSafetyDirective()
 
     // Phase 1 : Mia ouvre la réunion
-    const openingContext = `Nouvelle réunion de production. L'idée du client est : "${this.idea}".${this.brandKit ? `\n\nBrand Kit de la chaîne :\n${this.brandKit}` : ''}${templateContext}${outputLockContext}${referenceImagesContext}\n\nPrésente le brief à l'équipe et lance la discussion. Sois directe et motivante.`
+    const openingContext = `Nouvelle réunion de production. L'idée du client est : "${this.idea}".${this.brandKit ? `\n\nBrand Kit de la chaîne :\n${this.brandKit}` : ''}${templateContext}${outputLockContext}${referenceImagesContext}\n\n${visualSafetyDirective}\n\nPrésente le brief à l'équipe et lance la discussion. Sois directe et motivante.`
 
     const opening = await this.agentSpeak('mia', openingContext)
     totalCost += opening.metadata?.costEur ?? 0
@@ -245,7 +260,7 @@ export class MeetingCoordinator {
       const msg = await this.agentSpeak(role, context, {
         resetHistory: true,
         timeoutMs: MEETING_LLM_TIMEOUT_MS,
-        contextualPrelude: referenceImagesDirective || undefined,
+        contextualPrelude: [referenceImagesDirective, visualSafetyDirective].filter(Boolean).join('\n\n') || undefined,
       })
       totalCost += msg.metadata?.costEur ?? 0
     }
@@ -259,7 +274,7 @@ export class MeetingCoordinator {
         const msg = await this.agentSpeak(role, context, {
           resetHistory: true,
           timeoutMs: MEETING_LLM_TIMEOUT_MS,
-          contextualPrelude: referenceImagesDirective || undefined,
+          contextualPrelude: [referenceImagesDirective, visualSafetyDirective].filter(Boolean).join('\n\n') || undefined,
         })
         totalCost += msg.metadata?.costEur ?? 0
       }
@@ -271,7 +286,7 @@ export class MeetingCoordinator {
     const brandCheck = await this.agentSpeak('emilie', brandCheckContext, {
       resetHistory: true,
       timeoutMs: MEETING_LLM_TIMEOUT_MS,
-      contextualPrelude: referenceImagesDirective || undefined,
+      contextualPrelude: [referenceImagesDirective, visualSafetyDirective].filter(Boolean).join('\n\n') || undefined,
     })
     brandCheck.messageType = 'validation'
     totalCost += brandCheck.metadata?.costEur ?? 0
@@ -289,7 +304,7 @@ export class MeetingCoordinator {
         model: this.meetingLlmModel ?? undefined,
         host: this.llmHost,
         headers: this.llmHeaders,
-        contextualPrelude: referenceImagesDirective || undefined,
+        contextualPrelude: [referenceImagesDirective, visualSafetyDirective].filter(Boolean).join('\n\n') || undefined,
       })
       await this.recordMessage(section)
       totalCost += section.metadata?.costEur ?? 0
@@ -302,7 +317,7 @@ export class MeetingCoordinator {
     }
 
     // Phase 6 : Mia conclut — utiliser le transcript tronqué
-    const closingContext = `Voici la réunion et les sections du brief :\n\n${transcript}\n\nConclus la réunion. Produis :\n1. Un résumé exécutif (5-7 lignes)\n2. Une estimation budget (en postes de coûts)\n3. Ta validation finale\n\nSois directe et structurée.`
+    const closingContext = `Voici la réunion et les sections du brief :\n\n${transcript}\n\nConclus la réunion. Produis :\n1. Un résumé exécutif (5-7 lignes)\n2. Une estimation budget (en postes de coûts)\n3. Ta validation finale\n\nRappelle explicitement que chaque scène doit imposer premier plan, plan intermédiaire, arrière-plan, interdire les fonds studio/neutres et rester pensée pour un rendu TikTok vertical 9:16.\n\nSois directe et structurée.`
 
     const closing = await this.agentSpeak('mia', closingContext, {
       resetHistory: true,
@@ -403,6 +418,7 @@ export class MeetingCoordinator {
     const compactTranscript = compactTranscriptForPrompt(transcript, SCENE_OUTLINE_TRANSCRIPT_MAX_CHARS)
     const outputLockContext = buildOutputLockContext(this.outputConfig)
     const referenceImagesContext = buildReferenceImagesContext(this.referenceImages)
+    const visualSafetyDirective = buildVisualSafetyDirective()
     const compactSections = sections.map((section) => ({
       agent: section.agent,
       title: section.title,
@@ -431,6 +447,9 @@ export class MeetingCoordinator {
                 '      "camera": "intention camera principale",',
                 '      "lighting": "intention lumiere",',
                 '      "duration_s": 5,',
+                '      "foreground": "ce qu on voit au premier plan",',
+                '      "midground": "ce qu on voit au plan intermédiaire",',
+                '      "background": "ce qu on voit a l arrière-plan",',
                 '      "emotion": "emotion dominante",',
                 '      "narrativeRole": "role de la scene dans le recit"',
                 '    }',
@@ -440,9 +459,13 @@ export class MeetingCoordinator {
                 '- reprends le découpage scène par scène décidé par la réunion, sans fusion ni compression arbitraire',
                 '- si plusieurs scènes sont évoquées, conserve-les toutes dans l ordre',
                 '- chaque scène doit rester dessinable et exploitable ensuite par la prod',
+                '- chaque scène doit décrire explicitement premier plan, plan intermédiaire et arrière-plan',
+                '- aucun fond studio, fond vide ou fond neutre : remets toujours l action dans un décor réel',
+                '- la composition doit rester pensée pour un rendu vertical TikTok 9:16',
                 '- camera et lighting doivent rester courts et concrets',
                 ...(outputLockContext ? [outputLockContext] : []),
                 ...(referenceImagesContext ? [referenceImagesContext] : []),
+                visualSafetyDirective,
               ].join('\n'),
             },
             {

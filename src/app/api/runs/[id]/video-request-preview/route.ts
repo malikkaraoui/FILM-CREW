@@ -11,6 +11,8 @@ import {
   HAPPYHORSE_GENERATE_PATH,
 } from '@/lib/providers/video/happyhorse'
 import type { ProviderHealth } from '@/lib/providers/types'
+import type { ProviderPromptMap } from '@/lib/pipeline/provider-prompting'
+import { resolveProviderPrompt } from '@/lib/pipeline/provider-prompting'
 
 bootstrapProviders()
 
@@ -18,6 +20,7 @@ type PromptEntry = {
   sceneIndex: number
   prompt: string
   negativePrompt?: string
+  providerPrompts?: ProviderPromptMap
 }
 
 const PIPELINE_VIDEO_OPTS = {
@@ -90,7 +93,7 @@ export async function GET(
         },
         requests: prompts.map((entry) => ({
           sceneIndex: entry.sceneIndex,
-          prompt: entry.prompt,
+          prompt: resolveProviderPrompt(entry.providerPrompts, 'happyhorse', entry.prompt),
           negativePrompt: entry.negativePrompt ?? '',
           negativePromptSent: false,
           chosenSettings: {
@@ -98,7 +101,7 @@ export async function GET(
             provider: 'happyhorse',
             referenceImageCount: referenceImageUrls.length,
           },
-          happyHorseBody: buildHappyHorseRequestBody(entry.prompt, {
+          happyHorseBody: buildHappyHorseRequestBody(resolveProviderPrompt(entry.providerPrompts, 'happyhorse', entry.prompt), {
             ...PIPELINE_VIDEO_OPTS,
             referenceImageUrls,
           }),

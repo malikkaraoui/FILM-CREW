@@ -118,7 +118,7 @@ export class BaseAgent {
     // Le transcript complet est passé directement dans le prompt.
     this.resetConversation()
 
-    const prompt = `Voici le transcript de la réunion de production :\n\n${meetingTranscript}\n\nÉcris ta section du brief. Tu es responsable de : ${this.profile.briefSection}.\n\nRédige un texte structuré et concis (10-20 lignes), directement utilisable pour la suite du pipeline.`
+    const prompt = `Voici le transcript de la réunion de production :\n\n${meetingTranscript}\n\nÉcris ta section du brief. Tu es responsable de : ${this.profile.briefSection}.\n\nRédige un texte structuré et concis (10-20 lignes), directement utilisable pour la suite du pipeline. Quand tu décris une scène, impose explicitement un premier plan, un plan intermédiaire et un arrière-plan. Interdis tout fond studio, fond neutre, fond vide ou sujet isolé sans décor. Rappelle aussi que la mise en scène doit rester pensée nativement pour un rendu TikTok vertical 9:16.`
 
     const message = await this.speak(prompt, runId, {
       resetHistory: true,

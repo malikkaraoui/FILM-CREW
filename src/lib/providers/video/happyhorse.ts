@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { spawn } from 'child_process'
 import type { VideoProvider, VideoOpts, VideoResult, ProviderHealth } from '../types'
 
 const API_KEY = process.env.HAPPYHORSE_API_KEY || ''
@@ -12,6 +13,31 @@ export const HAPPYHORSE_DEFAULT_SOUND = false
 export const HAPPYHORSE_DEFAULT_CFG_SCALE = 0.5
 const POLL_INTERVAL_MS = 5000
 const MAX_POLLS = 60 // 5 minutes max
+const FFPROBE_BIN = process.env.FFPROBE_BIN || 'ffprobe'
+
+async function probeVideoDimensions(filePath: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const proc = spawn(FFPROBE_BIN, [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height',
+      '-of', 'csv=p=0:s=x',
+      filePath,
+    ], { stdio: ['ignore', 'pipe', 'ignore'] })
+
+    let out = ''
+    proc.stdout.on('data', (d: Buffer) => { out += d.toString() })
+    proc.on('close', () => {
+      const match = out.trim().match(/^(\d+)x(\d+)$/)
+      if (!match) {
+        resolve(null)
+        return
+      }
+      resolve({ width: Number.parseInt(match[1], 10), height: Number.parseInt(match[2], 10) })
+    })
+    proc.on('error', () => resolve(null))
+  })
+}
 
 export function buildHappyHorseRequestBody(prompt: string, opts: VideoOpts): Record<string, unknown> {
   const duration = opts.duration ?? 5
@@ -130,6 +156,16 @@ export const happyhorseProvider: VideoProvider = {
         if (!dlRes.ok) throw new Error(`Échec téléchargement vidéo: ${dlRes.status}`)
         const buffer = await dlRes.arrayBuffer()
         await writeFile(filePath, Buffer.from(buffer))
+
+        if (opts.aspectRatio === '9:16') {
+          const dimensions = await probeVideoDimensions(filePath)
+          if (!dimensions) {
+            throw new Error('HappyHorse: impossible de vérifier le format réel de la vidéo retournée')
+          }
+          if (dimensions.height <= dimensions.width) {
+            throw new Error(`HappyHorse: format de sortie invalide pour TikTok 9:16 (${dimensions.width}x${dimensions.height})`)
+          }
+        }
 
         return { filePath, duration, costEur }
       }
