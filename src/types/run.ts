@@ -20,12 +20,15 @@ export type ReferenceImageConfig = {
   urls: string[]
 }
 
+export type GenerationMode = 'manual' | 'automatic'
+
 export type ProjectConfig = {
   meetingLlmMode: MeetingLlmMode
   meetingLlmModel: string
   stepLlmConfigs?: StepLlmConfigs
   outputConfig?: OutputConfig | null
   referenceImages?: ReferenceImageConfig | null
+  generationMode?: GenerationMode
 }
 
 export type Run = {

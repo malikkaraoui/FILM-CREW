@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
-import type { LlmMode, OutputConfig, ProjectConfig, ReferenceImageConfig, StepLlmConfig, StepLlmConfigs } from '@/types/run'
+import type { GenerationMode, LlmMode, OutputConfig, ProjectConfig, ReferenceImageConfig, StepLlmConfig, StepLlmConfigs } from '@/types/run'
 import {
   DEFAULT_CLOUD_LLM_MODEL,
   DEFAULT_LOCAL_LLM_MODEL,
@@ -11,6 +11,11 @@ import {
 const LLM_STEP_KEYS = ['2', '3', '4', '6'] as const
 type LlmStepKey = typeof LLM_STEP_KEYS[number]
 const DEFAULT_SCENE_DURATION_S = 10
+const DEFAULT_GENERATION_MODE: GenerationMode = 'manual'
+
+function normalizeGenerationMode(value: unknown): GenerationMode {
+  return value === 'automatic' ? 'automatic' : DEFAULT_GENERATION_MODE
+}
 
 function toPositiveInt(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.round(value)
@@ -135,6 +140,7 @@ export function buildProjectConfig(input?: Partial<ProjectConfig> | null): Proje
     stepLlmConfigs,
     outputConfig: normalizeOutputConfig(input?.outputConfig),
     referenceImages: normalizeReferenceImages(input?.referenceImages),
+    generationMode: normalizeGenerationMode(input?.generationMode),
   }
 }
 

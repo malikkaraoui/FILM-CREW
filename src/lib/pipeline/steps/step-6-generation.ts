@@ -22,6 +22,39 @@ export const step6Generation: PipelineStep = {
   async execute(ctx: StepContext): Promise<StepResult> {
     const projectConfig = await readProjectConfig(ctx.storagePath)
     const referenceImageUrls = projectConfig?.referenceImages?.urls ?? []
+    const generationMode = projectConfig?.generationMode ?? 'manual'
+
+    if (generationMode !== 'automatic') {
+      await writeFile(
+        join(ctx.storagePath, 'generation-manifest.json'),
+        JSON.stringify({
+          clips: [],
+          audioPath: null,
+          musicPath: null,
+          generationMode: 'manual',
+          note: 'Génération provider désactivée en automatique — lancer manuellement scène par scène.',
+          generatedAt: new Date().toISOString(),
+        }, null, 2),
+      )
+
+      logger.warn({
+        event: 'generation_manual_mode_skip',
+        runId: ctx.runId,
+        message: 'Étape 6 sautée en mode manuel pour éviter tout appel provider automatique',
+      })
+
+      return {
+        success: true,
+        costEur: 0,
+        outputData: {
+          clipCount: 0,
+          totalPrompts: 0,
+          hasAudio: false,
+          generationMode: 'manual',
+          autoGenerationSkipped: true,
+        },
+      }
+    }
 
     // Lire les prompts
     let promptData: { prompts: PromptEntry[] }
