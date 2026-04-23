@@ -271,24 +271,24 @@ export function Topbar() {
 
       {providerPills.length > 0 && (
         <div className="border-t px-4 py-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Providers
+              Services
             </span>
-            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="grid min-w-0 flex-1 auto-cols-max grid-flow-col grid-rows-2 gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {providerPills.map((provider) => {
                 const statusLabel = STATUS_LABELS[provider.health.status] ?? provider.health.status
                 return (
                   <div
                     key={provider.name}
-                    className={`shrink-0 flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] ${STATUS_TONES[provider.health.status] ?? 'border-border/60 bg-muted/30 text-foreground'}`}
+                    className={`min-w-34 shrink-0 rounded-xl border px-2.5 py-1.5 text-[11px] leading-tight whitespace-nowrap ${STATUS_TONES[provider.health.status] ?? 'border-border/60 bg-muted/30 text-foreground'}`}
                     title={provider.health.details
                       ? `${provider.name} — ${statusLabel} — ${provider.health.details}`
                       : `${provider.name} — ${statusLabel}`}
                   >
                     <span className={`inline-block h-2 w-2 rounded-full ${STATUS_COLORS[provider.health.status] ?? 'bg-gray-400'}`} />
-                    <span className="font-medium">{provider.name}</span>
-                    <span className="opacity-70">{statusLabel}</span>
+                    <span className="ml-1.5 font-medium">{provider.name}</span>
+                    <div className="mt-1 pl-3.5 text-[10px] opacity-70">{statusLabel}</div>
                   </div>
                 )
               })}
