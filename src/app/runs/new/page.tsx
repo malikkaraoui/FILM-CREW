@@ -41,6 +41,13 @@ const DEFAULT_OPENROUTER_MODEL = 'nvidia/nemotron-3-nano-30b-a3b:free'
 const DEFAULT_FULL_VIDEO_DURATION_S = 60
 const LOCKED_SCENE_DURATION_S = 10
 
+function buildModelOptions(models: string[], selectedModel: string): string[] {
+  const normalizedSelectedModel = selectedModel.trim()
+  if (!normalizedSelectedModel) return models
+  if (models.includes(normalizedSelectedModel)) return models
+  return [normalizedSelectedModel, ...models]
+}
+
 function NewRunForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -160,6 +167,9 @@ function NewRunForm() {
     : meetingMode === 'openrouter'
       ? meetingOpenRouterModel.trim()
       : meetingLocalModel.trim()
+  const meetingLocalModelOptions = buildModelOptions(localModels, meetingLocalModel)
+  const meetingCloudModelOptions = buildModelOptions(cloudModels, meetingCloudModel)
+  const meetingOpenRouterModelOptions = buildModelOptions(openRouterModels, meetingOpenRouterModel)
   const derivedSceneCount = Math.max(1, Math.ceil(fullVideoDurationS / LOCKED_SCENE_DURATION_S))
   const durationMismatch = fullVideoDurationS % LOCKED_SCENE_DURATION_S !== 0
   const referenceImageUrls = [
@@ -436,14 +446,14 @@ function NewRunForm() {
               {meetingMode === 'local' ? (
                 <div>
                   <Label htmlFor="meeting-local-model">Modèle local</Label>
-                  {localModels.length > 0 ? (
+                  {meetingLocalModelOptions.length > 0 ? (
                     <select
                       id="meeting-local-model"
                       value={meetingLocalModel}
                       onChange={(e) => setMeetingLocalModel(e.target.value)}
                       className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                     >
-                      {localModels.map((model) => (
+                      {meetingLocalModelOptions.map((model) => (
                         <option key={model} value={model}>{model}</option>
                       ))}
                     </select>
@@ -464,14 +474,14 @@ function NewRunForm() {
               ) : meetingMode === 'cloud' ? (
                 <div>
                   <Label htmlFor="meeting-cloud-model">Modèle cloud</Label>
-                  {cloudModels.length > 0 ? (
+                  {meetingCloudModelOptions.length > 0 ? (
                     <select
                       id="meeting-cloud-model"
                       value={meetingCloudModel}
                       onChange={(e) => setMeetingCloudModel(e.target.value)}
                       className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                     >
-                      {cloudModels.map((model) => (
+                      {meetingCloudModelOptions.map((model) => (
                         <option key={model} value={model}>{model}</option>
                       ))}
                     </select>
@@ -492,14 +502,14 @@ function NewRunForm() {
               ) : (
                 <div>
                   <Label htmlFor="meeting-openrouter-model">Modèle OpenRouter</Label>
-                  {openRouterModels.length > 0 ? (
+                  {meetingOpenRouterModelOptions.length > 0 ? (
                     <select
                       id="meeting-openrouter-model"
                       value={meetingOpenRouterModel}
                       onChange={(e) => setMeetingOpenRouterModel(e.target.value)}
                       className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                     >
-                      {openRouterModels.map((model) => (
+                      {meetingOpenRouterModelOptions.map((model) => (
                         <option key={model} value={model}>{model}</option>
                       ))}
                     </select>

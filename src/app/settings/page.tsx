@@ -40,6 +40,13 @@ function getModelsForMode(catalog: LlmCatalog, mode: LlmMode): string[] {
   return catalog.localModels
 }
 
+function buildModelOptions(models: string[], selectedModel: string): string[] {
+  const normalizedSelectedModel = selectedModel.trim()
+  if (!normalizedSelectedModel) return models
+  if (models.includes(normalizedSelectedModel)) return models
+  return [normalizedSelectedModel, ...models]
+}
+
 function getModelPlaceholder(mode: LlmMode, stepKey: keyof StepLlmConfigs): string {
   const fallback = getBuiltInStepLlmDefault(stepKey)
   return mode === fallback.mode ? fallback.model : fallback.model
@@ -176,7 +183,8 @@ export default function SettingsPage() {
             {STEP_LLM_DEFAULT_FIELDS.map((definition) => {
               const keys = getStepLlmDefaultConfigKeys(definition.stepKey)
               const mode = (values[keys.modeKey] as LlmMode | undefined) ?? definition.defaultMode
-              const models = getModelsForMode(catalog, mode)
+              const selectedModel = values[keys.modelKey] ?? ''
+              const models = buildModelOptions(getModelsForMode(catalog, mode), selectedModel)
 
               return (
                 <div key={definition.stepKey} className="rounded-lg border p-4 space-y-3">
@@ -205,7 +213,7 @@ export default function SettingsPage() {
                       {models.length > 0 ? (
                         <select
                           id={keys.modelKey}
-                          value={values[keys.modelKey] ?? ''}
+                          value={selectedModel}
                           onChange={(e) => setValues((prev) => ({ ...prev, [keys.modelKey]: e.target.value }))}
                           className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                         >

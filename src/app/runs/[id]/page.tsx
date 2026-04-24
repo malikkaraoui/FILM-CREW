@@ -59,6 +59,13 @@ function getModelsForMode(catalog: LlmCatalog, mode: LlmMode): string[] {
   return catalog.localModels
 }
 
+function buildModelOptions(models: string[], selectedModel: string): string[] {
+  const normalizedSelectedModel = selectedModel.trim()
+  if (!normalizedSelectedModel) return models
+  if (models.includes(normalizedSelectedModel)) return models
+  return [normalizedSelectedModel, ...models]
+}
+
 function getModelPlaceholder(mode: LlmMode): string {
   if (mode === 'cloud') return 'deepseek-v3.1:671b-cloud'
   if (mode === 'openrouter') return 'nvidia/nemotron-3-nano-30b-a3b:free'
@@ -663,7 +670,7 @@ export default function RunPage() {
 
     const availableModels = getModelsForMode(catalog, selectedLlmMode)
     if (availableModels.length === 0) return
-    if (availableModels.includes(selectedLlmModel)) return
+    if (selectedLlmModel.trim()) return
 
     setSelectedLlmModel(availableModels[0])
   }, [catalog.cloudModels, catalog.localModels, catalog.openRouterModels, selectedLlmMode, selectedLlmModel, selectedStep])
@@ -887,7 +894,7 @@ export default function RunPage() {
 
                     <div>
                       <label htmlFor="step-llm-model" className="text-xs font-medium text-muted-foreground">Modèle</label>
-                      {getModelsForMode(catalog, selectedLlmMode).length > 0 ? (
+                      {buildModelOptions(getModelsForMode(catalog, selectedLlmMode), selectedLlmModel).length > 0 ? (
                         <select
                           id="step-llm-model"
                           value={selectedLlmModel}
@@ -895,7 +902,7 @@ export default function RunPage() {
                           className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
                           disabled={run.status === 'running'}
                         >
-                          {getModelsForMode(catalog, selectedLlmMode).map((model) => (
+                          {buildModelOptions(getModelsForMode(catalog, selectedLlmMode), selectedLlmModel).map((model) => (
                             <option key={model} value={model}>{model}</option>
                           ))}
                         </select>

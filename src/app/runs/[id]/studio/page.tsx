@@ -25,6 +25,13 @@ function getModelsForMode(catalog: LlmCatalog, mode: LlmMode): string[] {
   return catalog.localModels
 }
 
+function buildModelOptions(models: string[], selectedModel: string): string[] {
+  const normalizedSelectedModel = selectedModel.trim()
+  if (!normalizedSelectedModel) return models
+  if (models.includes(normalizedSelectedModel)) return models
+  return [normalizedSelectedModel, ...models]
+}
+
 function getModeLabel(mode: LlmMode): string {
   if (mode === 'cloud') return 'Cloud'
   if (mode === 'openrouter') return 'OpenRouter'
@@ -156,7 +163,7 @@ export default function StudioPage() {
   useEffect(() => {
     const models = getModelsForMode(catalog, selectedMeetingMode)
     if (models.length === 0) return
-    if (models.includes(selectedMeetingModel)) return
+    if (selectedMeetingModel.trim()) return
 
     setSelectedMeetingModel(models[0])
   }, [catalog.cloudModels, catalog.localModels, catalog.openRouterModels, selectedMeetingMode, selectedMeetingModel])
@@ -172,7 +179,7 @@ export default function StudioPage() {
   useEffect(() => {
     const models = getModelsForMode(catalog, nextStepMode)
     if (models.length === 0) return
-    if (models.includes(nextStepModel)) return
+    if (nextStepModel.trim()) return
 
     setNextStepModel(models[0])
   }, [catalog.cloudModels, catalog.localModels, catalog.openRouterModels, nextStepMode, nextStepModel])
@@ -388,7 +395,7 @@ export default function StudioPage() {
     onModelChange: (model: string) => void
     prefix: string
   }) {
-    const models = getModelsForMode(catalog, options.mode)
+    const models = buildModelOptions(getModelsForMode(catalog, options.mode), options.model)
     const placeholder = getModelPlaceholder(options.mode)
 
     return (
