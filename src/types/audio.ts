@@ -152,6 +152,20 @@ export type AudioAssetType =
 
 export type AudioAssetStatus = 'draft' | 'assembled' | 'validated' | 'rejected'
 
+// ─── FX Library ───
+
+export type FXCategory = 'impacts' | 'transitions' | 'nature' | 'urban' | 'ui'
+
+export type FXAsset = {
+  id: string
+  category: FXCategory
+  filename: string
+  filePath: string         // chemin absolu résolu au chargement
+  description: string
+  durationS: number
+  tags: string[]
+}
+
 // ─── Canon audio scène — v1.0 ───
 
 export type SceneIntention = {
