@@ -1,10 +1,19 @@
-import { writeFile } from 'fs/promises'
+import { writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { renderDialogueToTTS } from './tts-renderer'
 import { assembleDialogueAudio } from './audio-assembler'
 import { upsertAudioAsset } from '@/lib/db/queries/audio-assets'
 import type { AudioPreviewManifest } from '@/types/audio'
 import { logger } from '@/lib/logger'
+
+const MANIFEST_FILENAME = 'audio_preview_manifest.json'
+
+/**
+ * Supprime le manifest stale (rerun / échec).
+ */
+async function cleanupManifest(storagePath: string): Promise<void> {
+  await rm(join(storagePath, MANIFEST_FILENAME), { force: true }).catch(() => {})
+}
 
 // ─── Types ───
 
@@ -30,6 +39,9 @@ export async function buildAudioPreview(params: {
   voice?: string
 }): Promise<AudioManifestResult | null> {
   const { storagePath, runId, language, voice } = params
+
+  // Cleanup stale manifest au début (rerun safe)
+  await cleanupManifest(storagePath)
 
   // ── Étape 1 : TTS multi-lignes ──
   const ttsManifest = await renderDialogueToTTS({ storagePath, runId, language, voice })
@@ -62,10 +74,16 @@ export async function buildAudioPreview(params: {
     timeline: assembly.timeline,
   }
 
-  await writeFile(
-    join(storagePath, 'audio_preview_manifest.json'),
-    JSON.stringify(manifest, null, 2),
-  )
+  try {
+    await writeFile(
+      join(storagePath, MANIFEST_FILENAME),
+      JSON.stringify(manifest, null, 2),
+    )
+  } catch (error) {
+    logger.warn({ event: 'audio_manifest_write_failed', runId, error: (error as Error).message })
+    await cleanupManifest(storagePath)
+    return null
+  }
 
   // ── Persist DB ──
   await upsertAudioAsset({
