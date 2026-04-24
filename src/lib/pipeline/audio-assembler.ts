@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { spawn } from 'child_process'
 import type { TTSManifest } from './tts-renderer'
@@ -6,7 +6,7 @@ import type { DialogueScript, AudioTimeline, AudioSegment } from '@/types/audio'
 import { logger } from '@/lib/logger'
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg'
-const CROSSFADE_MS = 200
+const SCENE_GAP_MS = 200  // silence inter-scènes (pas un crossfade)
 const SAMPLE_RATE = 24000
 const CHANNELS = 1
 
@@ -84,12 +84,34 @@ async function concatWavFiles(inputPaths: string[], outputPath: string): Promise
  * - audio/audio_preview.wav
  * - audio_timeline.json (type AudioTimeline)
  */
+/**
+ * Supprime les artefacts d'assemblage audio (stale ou erreur).
+ */
+async function cleanupAssemblyArtifacts(storagePath: string): Promise<void> {
+  await rm(join(storagePath, 'audio', 'audio_preview.wav'), { force: true }).catch(() => {})
+  await rm(join(storagePath, 'audio_timeline.json'), { force: true }).catch(() => {})
+  // Nettoyer les fichiers de silence générés dans audio/
+  const audioDir = join(storagePath, 'audio')
+  try {
+    const { readdir } = await import('fs/promises')
+    const files = await readdir(audioDir)
+    for (const f of files) {
+      if (f.startsWith('silence-')) {
+        await rm(join(audioDir, f), { force: true }).catch(() => {})
+      }
+    }
+  } catch { /* audioDir n'existe pas encore */ }
+}
+
 export async function assembleDialogueAudio(params: {
   storagePath: string
   runId: string
-  crossfadeMs?: number
+  sceneGapMs?: number
 }): Promise<AudioAssemblyResult | null> {
-  const { storagePath, runId, crossfadeMs = CROSSFADE_MS } = params
+  const { storagePath, runId, sceneGapMs = SCENE_GAP_MS } = params
+
+  // Toujours nettoyer les stale artifacts au début (rerun safe)
+  await cleanupAssemblyArtifacts(storagePath)
 
   // Lire le manifest TTS
   let manifest: TTSManifest
@@ -137,11 +159,11 @@ export async function assembleDialogueAudio(params: {
   let prevSceneIndex = -1
 
   for (const line of manifest.lines) {
-    // Crossfade entre scènes (silence court)
+    // Silence inter-scènes (gap entre scènes distinctes)
     if (prevSceneIndex !== -1 && line.sceneIndex !== prevSceneIndex) {
-      const crossfadeS = crossfadeMs / 1000
-      const silencePath = join(audioDir, `silence-crossfade-${segmentIndex}.wav`)
-      await generateSilence(silencePath, crossfadeS)
+      const gapS = sceneGapMs / 1000
+      const silencePath = join(audioDir, `silence-gap-${segmentIndex}.wav`)
+      await generateSilence(silencePath, gapS)
       filesToConcat.push(silencePath)
 
       segments.push({
@@ -149,17 +171,17 @@ export async function assembleDialogueAudio(params: {
         sceneIndex: line.sceneIndex,
         type: 'transition',
         startS: Number(currentTimeS.toFixed(3)),
-        endS: Number((currentTimeS + crossfadeS).toFixed(3)),
-        durationS: Number(crossfadeS.toFixed(3)),
+        endS: Number((currentTimeS + gapS).toFixed(3)),
+        durationS: Number(gapS.toFixed(3)),
         content: {
           musicActive: false,
           ambianceActive: false,
           fxActive: [],
         },
-        videoPromptHint: 'transition entre scènes',
+        videoPromptHint: 'silence inter-scènes',
       })
 
-      currentTimeS += crossfadeS
+      currentTimeS += gapS
       segmentIndex++
     }
 
@@ -228,6 +250,7 @@ export async function assembleDialogueAudio(params: {
 
   if (filesToConcat.length === 0) {
     logger.warn({ event: 'audio_assemble_no_files', runId })
+    await cleanupAssemblyArtifacts(storagePath)
     return null
   }
 
@@ -241,7 +264,13 @@ export async function assembleDialogueAudio(params: {
     segmentCount: segments.length,
   })
 
-  await concatWavFiles(filesToConcat, audioPreviewPath)
+  try {
+    await concatWavFiles(filesToConcat, audioPreviewPath)
+  } catch (error) {
+    logger.warn({ event: 'audio_assemble_ffmpeg_failed', runId, error: (error as Error).message })
+    await cleanupAssemblyArtifacts(storagePath)
+    return null
+  }
 
   // Construire la timeline
   const timeline: AudioTimeline = {

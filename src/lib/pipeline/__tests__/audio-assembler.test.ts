@@ -161,7 +161,7 @@ describe('assembleDialogueAudio', () => {
     expect(silences[0].content.silenceMarker?.purpose).toBe('respiration')
   }, 15000)
 
-  it('insère un crossfade entre scènes différentes', async () => {
+  it('insère un silence inter-scènes entre scènes différentes', async () => {
     await writeFile(join(storagePath, 'tts_manifest.json'), JSON.stringify(sampleManifest))
     await setupTTSFiles()
 
@@ -170,10 +170,11 @@ describe('assembleDialogueAudio', () => {
 
     expect(result).not.toBeNull()
 
-    // Transition entre scène 1 et scène 2
+    // Silence inter-scènes entre scène 1 et scène 2
     const transitions = result!.timeline.segments.filter((s) => s.type === 'transition')
     expect(transitions.length).toBe(1)
     expect(transitions[0].durationS).toBeCloseTo(0.2, 2) // 200ms par défaut
+    expect(transitions[0].videoPromptHint).toContain('silence inter-scènes')
   }, 15000)
 
   it('fonctionne sans dialogue_script.json (pas de silences)', async () => {
@@ -188,6 +189,60 @@ describe('assembleDialogueAudio', () => {
     // Uniquement dialogue + transitions, pas de silence
     const silences = result!.timeline.segments.filter((s) => s.type === 'silence')
     expect(silences.length).toBe(0)
+  }, 15000)
+
+  // ─── Stale artifacts regression ───
+
+  it('nettoie les stale artifacts quand manifest est absent', async () => {
+    // Pré-créer des stale artifacts
+    await mkdir(join(storagePath, 'audio'), { recursive: true })
+    await writeFile(join(storagePath, 'audio', 'audio_preview.wav'), Buffer.from('stale'))
+    await writeFile(join(storagePath, 'audio_timeline.json'), JSON.stringify({ stale: true }))
+
+    const { assembleDialogueAudio } = await import('../audio-assembler')
+    const result = await assembleDialogueAudio({ storagePath, runId: 'r1' })
+
+    expect(result).toBeNull()
+    // Les stale artifacts doivent avoir été supprimés
+    await expect(access(join(storagePath, 'audio', 'audio_preview.wav'))).rejects.toThrow()
+    await expect(access(join(storagePath, 'audio_timeline.json'))).rejects.toThrow()
+  })
+
+  it('nettoie les stale artifacts quand manifest est vide', async () => {
+    const emptyManifest: TTSManifest = { ...sampleManifest, lines: [] }
+    await writeFile(join(storagePath, 'tts_manifest.json'), JSON.stringify(emptyManifest))
+
+    // Pré-créer des stale artifacts
+    await mkdir(join(storagePath, 'audio'), { recursive: true })
+    await writeFile(join(storagePath, 'audio', 'audio_preview.wav'), Buffer.from('stale'))
+    await writeFile(join(storagePath, 'audio_timeline.json'), JSON.stringify({ stale: true }))
+
+    const { assembleDialogueAudio } = await import('../audio-assembler')
+    const result = await assembleDialogueAudio({ storagePath, runId: 'r1' })
+
+    expect(result).toBeNull()
+    await expect(access(join(storagePath, 'audio', 'audio_preview.wav'))).rejects.toThrow()
+    await expect(access(join(storagePath, 'audio_timeline.json'))).rejects.toThrow()
+  })
+
+  it('nettoie les stale artifacts au rerun (avant assemblage)', async () => {
+    // Premier run : assemblage réussi
+    await writeFile(join(storagePath, 'tts_manifest.json'), JSON.stringify(sampleManifest))
+    await writeFile(join(storagePath, 'dialogue_script.json'), JSON.stringify(sampleScript))
+    await setupTTSFiles()
+
+    const { assembleDialogueAudio } = await import('../audio-assembler')
+    const result1 = await assembleDialogueAudio({ storagePath, runId: 'test-run' })
+    expect(result1).not.toBeNull()
+
+    // Vérifier que les artifacts existent
+    await expect(access(join(storagePath, 'audio', 'audio_preview.wav'))).resolves.not.toThrow()
+    await expect(access(join(storagePath, 'audio_timeline.json'))).resolves.not.toThrow()
+
+    // Deuxième run : les anciens artifacts sont nettoyés puis recréés
+    const result2 = await assembleDialogueAudio({ storagePath, runId: 'test-run' })
+    expect(result2).not.toBeNull()
+    expect(result2!.totalDurationS).toBeGreaterThan(0)
   }, 15000)
 
   it('les segments ont des timestamps continus croissants', async () => {
