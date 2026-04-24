@@ -5,7 +5,7 @@ import { deleteClipsForRun, resetRunStepsFromStep, updateRunStatus } from '@/lib
 
 const STEP_ARTIFACTS: Record<number, string[]> = {
   2: ['brief.json'],
-  3: ['structure.json', 'structure-raw.txt', 'director-plan.json'],
+  3: ['structure.json', 'structure-raw.txt', 'director-plan.json', 'dialogue_script.json'],
   4: ['storyboard-blueprint.json', 'storyboard-blueprint-raw.txt'],
   5: ['storyboard', 'failover-log.json'],
   6: ['prompts.json', 'prompt-manifest.json'],

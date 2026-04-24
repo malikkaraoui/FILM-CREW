@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { executeWithFailover } from '@/lib/providers/failover'
 import type { LLMProvider } from '@/lib/providers/types'
@@ -160,9 +160,9 @@ async function buildDialogueScript(
   brief: MeetingBrief | null,
   structuredJson: Record<string, unknown>,
   llmTarget: { model: string; host?: string; headers?: Record<string, string> },
-): Promise<DialogueScript | null> {
+): Promise<{ script: DialogueScript | null; costEur: number }> {
   const scenes = Array.isArray(structuredJson.scenes) ? structuredJson.scenes : []
-  if (scenes.length === 0) return null
+  if (scenes.length === 0) return { script: null, costEur: 0 }
 
   // Extraire les sections audio du brief (sami, jade, remi, theo)
   const audioSections = brief?.sections
@@ -228,14 +228,17 @@ async function buildDialogueScript(
     parsed.language = parsed.language || 'fr'
     parsed.totalDurationTargetS = parsed.totalDurationTargetS || targetDuration
 
-    return parsed
+    return {
+      script: parsed,
+      costEur: result.costEur,
+    }
   } catch (error) {
     logger.warn({
       event: 'dialogue_script_generation_failed',
       runId: ctx.runId,
       error: (error as Error).message,
     })
-    return null
+    return { script: null, costEur: 0 }
   }
 }
 
@@ -348,7 +351,7 @@ Retourne UNIQUEMENT le JSON, sans markdown ni explication.${templateContext}${ou
 
     const rawSceneCount = Array.isArray(parsed.scenes) ? parsed.scenes.length : 0
     parsed = alignStructuredStoryToBriefOutline(parsed, sceneOutline)
-  parsed = applyOutputConfigLock(parsed, outputConfig)
+    parsed = applyOutputConfigLock(parsed, outputConfig)
     const alignedSceneCount = Array.isArray(parsed.scenes) ? parsed.scenes.length : 0
 
     if (sceneOutline.length > 0 && rawSceneCount !== alignedSceneCount) {
@@ -415,8 +418,12 @@ Retourne UNIQUEMENT le JSON, sans markdown ni explication.${templateContext}${ou
     // Le script est produit par un second appel LLM à partir du brief + structure.
 
     let dialogueScriptSummary: { sceneCount: number; lineCount: number } | null = null
+    let totalCostEur = result.costEur
 
-    const dialogueScript = await buildDialogueScript(ctx, brief, parsed, llmTarget)
+    const dialogueScriptResult = await buildDialogueScript(ctx, brief, parsed, llmTarget)
+    totalCostEur += dialogueScriptResult.costEur
+
+    const dialogueScript = dialogueScriptResult.script
 
     if (dialogueScript) {
       await writeFile(
@@ -437,11 +444,13 @@ Retourne UNIQUEMENT le JSON, sans markdown ni explication.${templateContext}${ou
         lineCount,
         totalDurationTargetS: dialogueScript.totalDurationTargetS,
       })
+    } else {
+      await rm(join(ctx.storagePath, 'dialogue_script.json'), { force: true }).catch(() => {})
     }
 
     return {
       success: true,
-      costEur: result.costEur,
+      costEur: totalCostEur,
       outputData: {
         ...parsed,
         llm: { mode: llmTarget.mode, model: llmTarget.model },
