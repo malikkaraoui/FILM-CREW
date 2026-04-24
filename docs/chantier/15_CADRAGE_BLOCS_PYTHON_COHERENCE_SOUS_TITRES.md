@@ -949,41 +949,61 @@ Le lot s’arrête dès que le pipeline principal lit le JSON word-level et prod
 
 ### Zone de compte rendu Claude — Lot 1B
 
-**Statut** : `TODO / EN COURS / LIVRÉ / VALIDÉ`
+**Statut** : `LIVRÉ`
 
-**Branche de travail** :
+**Branche de travail** : `feat/python-media-precision`
 
-**Commit SHA** :
+**Commit SHA** : `920f192`
 
-**Résumé de livraison** :
+**Résumé de livraison** : Le chemin nominal de génération SRT utilise désormais le transcript word-level faster-whisper quand disponible. Fallback automatique sur le timing proportionnel si Python échoue.
 
 **Ce qui a été fait** :
 
-- 
+- `generateSRTFromWhisper(segments, outputDir)` ajoutée dans `subtitles.ts` — produit un SRT avec timestamps exacts des mots whisper
+- Découpage automatique des segments longs (>8s) en sous-blocs basés sur les timestamps des mots
+- `step-7-preview.ts` : tente `transcribeWordLevel()` → si succès → `generateSRTFromWhisper()` → sinon → fallback `generateSRT()` (proportionnel)
+- Nouveau champ manifest : `subtitleSource: 'whisper' | 'proportional' | null`
+- Le transcript word-level JSON est aussi sauvé dans `final/transcript-word-level.json` pour exploitation future (Hormozi, etc.)
+- 4 nouveaux tests Lot 1B (SRT exact, découpage segments longs, rejet si vide, fallback proportionnel)
 
 **Comment cela a été fait** :
 
-- 
+- `generateSRTFromWhisper` itère sur les segments whisper et utilise directement `start_s`/`end_s` comme timestamps SRT
+- Pour les segments >8s, elle découpe aux frontières de mots en accumulant les mots jusqu'à dépasser 8s
+- Dans `step-7-preview.ts`, le bloc SRT essaie d'abord whisper (via `transcribeWordLevel()`), puis fallback sur l'ancien code proportionnel si `srtPath` est encore null
+- `subtitleSource` dans le manifest permet de tracer quel chemin a été emprunté
 
 **Fichiers créés / modifiés** :
 
-- 
+- `src/lib/pipeline/subtitles.ts` — MODIFIÉ (ajout `generateSRTFromWhisper`)
+- `src/lib/pipeline/steps/step-7-preview.ts` — MODIFIÉ (branchement whisper + fallback + `subtitleSource`)
+- `src/lib/pipeline/__tests__/whisper-bridge.test.ts` — MODIFIÉ (4 tests Lot 1B ajoutés)
 
 **Commandes / tests exécutés** :
 
-- 
+- `npx tsc --noEmit --skipLibCheck` → 0 erreur
+- `npx vitest run src/lib/pipeline/__tests__/whisper-bridge.test.ts` → 10/10 passed
+- `npx vitest run src/lib/pipeline/__tests__/` → 234/234 passed, 0 régression
 
 **Résultat observé** :
 
-- 
+- SRT exact : timestamps directement issus de faster-whisper (ex: `00:00:00,000 --> 00:00:02,500`)
+- Découpage >8s : segment de 18s découpé en 2+ sous-blocs aux frontières de mots
+- Fallback : si whisper échoue → ancien timing proportionnel, pipeline continue
+- Manifest : `subtitleSource` = `'whisper'` ou `'proportional'` selon le chemin emprunté
 
 **Limites connues / reste à faire avant lot suivant** :
 
-- 
+- Pas de génération VTT (SRT uniquement) — suffisant pour le burn FFmpeg actuel
+- Le transcript JSON est sauvé mais pas encore exploité pour Hormozi (Lot 2A)
+- `PYTHON_BIN` par défaut = `python3` — si le venv n'est pas dans le PATH, il faut configurer `PYTHON_BIN=.venv/bin/python`
+- Le modèle whisper est hardcodé `base` dans step-7-preview — pourrait être configurable via env
 
 **Demande de validation Copilot / Malik** :
 
-- 
+- Le branchement whisper → fallback proportionnel est-il conforme ?
+- Le champ `subtitleSource` dans le manifest convient-il ?
+- Feu vert pour le Lot 1C (positionnement sous-titres top/center/bottom) ?
 
 ---
 
