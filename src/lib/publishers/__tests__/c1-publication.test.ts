@@ -3,7 +3,7 @@ import { rmSync, mkdirSync } from 'fs'
 import { writeFile, readFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { buildPublishPackage } from '@/lib/publishers/publish-package'
+import { buildPublishPackage, savePublishPackage, readPublishPackage } from '@/lib/publishers/publish-package'
 import type {
   PublishPackage,
   PreflightReport,
@@ -98,6 +98,43 @@ describe('C1.1 — buildPublishPackage', () => {
     expect(pkg.audio.masterPath).toBe('')
     expect(pkg.audio.totalDurationS).toBe(0)
     expect(pkg.preview.mode).toBe('none')
+  })
+
+  it('save/read roundtrip dans le final/ du storagePath fourni', async () => {
+    const runId = 'test-save-read'
+    const storagePath = join(FIXTURE_DIR, runId, 'final')
+    mkdirSync(storagePath, { recursive: true })
+
+    const pkg = buildPublishPackage({
+      runId,
+      audio: {
+        masterPath: 'storage/runs/test-save-read/audio/master.wav',
+        totalDurationS: 12,
+        sceneCount: 1,
+        generatedAt: '2026-04-25T00:00:00.000Z',
+      },
+      preview: {
+        mode: 'animatic',
+        playableFilePath: 'storage/runs/test-save-read/final/animatic.mp4',
+        hasAudio: true,
+      },
+      publication: {
+        title: 'Roundtrip',
+        description: 'Roundtrip publish package',
+        hashtags: ['#test'],
+      },
+    })
+
+    await savePublishPackage(runId, pkg, storagePath)
+
+    const raw = JSON.parse(await readFile(join(storagePath, 'publish-package.json'), 'utf-8')) as PublishPackage
+    expect(raw.runId).toBe(runId)
+    expect(raw.audio.masterPath).toContain('master.wav')
+
+    const loaded = await readPublishPackage(runId, storagePath)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.publication.title).toBe('Roundtrip')
+    expect(loaded!.preview.mode).toBe('animatic')
   })
 })
 

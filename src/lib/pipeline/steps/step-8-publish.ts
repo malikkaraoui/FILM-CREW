@@ -113,7 +113,7 @@ export const step8Publish: PipelineStep = {
       publication: { title, description, hashtags },
     })
 
-    await savePublishPackage(ctx.runId, pkg)
+    await savePublishPackage(ctx.runId, pkg, finalDir)
 
     logger.info({
       event: 'publish_package_written',

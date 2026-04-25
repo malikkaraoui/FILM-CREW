@@ -11,6 +11,10 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import type { PublishPackage } from './platform-types'
 
+function resolveFinalDir(runId: string, storagePath?: string): string {
+  return storagePath ?? join(process.cwd(), 'storage', 'runs', runId, 'final')
+}
+
 /**
  * Construit un PublishPackage à partir des manifests disponibles.
  */
@@ -53,8 +57,12 @@ export function buildPublishPackage(opts: {
 /**
  * Persiste le publish-package dans final/publish-package.json.
  */
-export async function savePublishPackage(runId: string, pkg: PublishPackage): Promise<void> {
-  const finalDir = join(process.cwd(), 'storage', 'runs', runId, 'final')
+export async function savePublishPackage(
+  runId: string,
+  pkg: PublishPackage,
+  storagePath?: string,
+): Promise<void> {
+  const finalDir = resolveFinalDir(runId, storagePath)
   await mkdir(finalDir, { recursive: true })
   await writeFile(join(finalDir, 'publish-package.json'), JSON.stringify(pkg, null, 2))
 }
@@ -62,10 +70,13 @@ export async function savePublishPackage(runId: string, pkg: PublishPackage): Pr
 /**
  * Lit le publish-package existant, ou null s'il est absent.
  */
-export async function readPublishPackage(runId: string): Promise<PublishPackage | null> {
+export async function readPublishPackage(
+  runId: string,
+  storagePath?: string,
+): Promise<PublishPackage | null> {
   try {
     const raw = await readFile(
-      join(process.cwd(), 'storage', 'runs', runId, 'final', 'publish-package.json'),
+      join(resolveFinalDir(runId, storagePath), 'publish-package.json'),
       'utf-8',
     )
     return JSON.parse(raw) as PublishPackage

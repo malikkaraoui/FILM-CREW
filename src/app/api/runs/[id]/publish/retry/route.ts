@@ -46,7 +46,7 @@ export async function POST(
   let hashtags: string[]
   let mediaMode: string
 
-  const pkg = await readPublishPackage(id)
+  const pkg = await readPublishPackage(id, join(storagePath, 'final'))
 
   if (pkg) {
     const playable = pkg.preview.playableFilePath

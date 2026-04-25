@@ -20,6 +20,7 @@ vi.mock('fs/promises', () => ({
 import { readFile, writeFile } from 'fs/promises'
 import { savePublishResult } from '@/lib/publishers/tiktok'
 import { publishToPlatform, upsertPublishManifest } from '@/lib/publishers/factory'
+import { savePublishPackage } from '@/lib/publishers/publish-package'
 import { step8Publish } from './step-8-publish'
 import type { StepContext } from '../types'
 import type { PublishResult } from '@/lib/publishers/tiktok'
@@ -32,6 +33,7 @@ const mockWriteFile = writeFile as MockedFunction<typeof writeFile>
 const mockSavePublishResult = savePublishResult as MockedFunction<typeof savePublishResult>
 const mockPublishToPlatform = publishToPlatform as MockedFunction<typeof publishToPlatform>
 const mockUpsertPublishManifest = upsertPublishManifest as MockedFunction<typeof upsertPublishManifest>
+const mockSavePublishPackage = savePublishPackage as MockedFunction<typeof savePublishPackage>
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -252,6 +254,14 @@ describe('step8Publish — metadata.json', () => {
     await step8Publish.execute(makeCtx('/tmp/run_test'))
     const writeCall = mockWriteFile.mock.calls.find((c) => String(c[0]).includes('metadata.json'))!
     expect(String(writeCall[0])).toBe('/tmp/run_test/final/metadata.json')
+  })
+
+  it('publish-package sauvegardé dans storagePath/final/', async () => {
+    setupReadFiles(PREVIEW_NONE)
+    setupPublishers()
+    await step8Publish.execute(makeCtx('/tmp/run_test'))
+    expect(mockSavePublishPackage).toHaveBeenCalledOnce()
+    expect(mockSavePublishPackage.mock.calls[0][2]).toBe('/tmp/run_test/final')
   })
 })
 
