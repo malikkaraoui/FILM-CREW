@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { MockedFunction } from 'vitest'
 
 vi.mock('@/lib/pipeline/tts-renderer')
@@ -6,7 +6,10 @@ vi.mock('@/lib/audio/tts-render')
 vi.mock('@/lib/audio/mix-scene')
 vi.mock('@/lib/audio/mix-master')
 vi.mock('@/lib/audio/fx-library')
+vi.mock('@/lib/audio/ambiance-library')
+vi.mock('@/lib/audio/ambiance-selector')
 vi.mock('@/lib/audio/scene-assets')
+vi.mock('@/lib/audio/stt-validation')
 vi.mock('@/lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 vi.mock('fs/promises', () => ({
   readFile: vi.fn(),
@@ -21,7 +24,10 @@ import { assembleSceneTTS } from '@/lib/audio/tts-render'
 import { mixScene } from '@/lib/audio/mix-scene'
 import { assembleMaster } from '@/lib/audio/mix-master'
 import { loadFXIndex } from '@/lib/audio/fx-library'
+import { loadAmbianceIndex } from '@/lib/audio/ambiance-library'
+import { selectAmbianceForScene } from '@/lib/audio/ambiance-selector'
 import { resolveMusicFromStructure } from '@/lib/audio/scene-assets'
+import { runSttValidation } from '@/lib/audio/stt-validation'
 import { parseSceneAudioPackage } from '@/lib/audio/scene-canon'
 
 import {
@@ -86,7 +92,25 @@ const mockAssembleSceneTTS = assembleSceneTTS as MockedFunction<typeof assembleS
 const mockMixScene = mixScene as MockedFunction<typeof mixScene>
 const mockAssembleMaster = assembleMaster as MockedFunction<typeof assembleMaster>
 const mockLoadFXIndex = loadFXIndex as MockedFunction<typeof loadFXIndex>
+const mockLoadAmbianceIndex = loadAmbianceIndex as MockedFunction<typeof loadAmbianceIndex>
+const mockSelectAmbianceForScene = selectAmbianceForScene as MockedFunction<typeof selectAmbianceForScene>
 const mockResolveMusicFromStructure = resolveMusicFromStructure as MockedFunction<typeof resolveMusicFromStructure>
+const mockRunSttValidation = runSttValidation as MockedFunction<typeof runSttValidation>
+
+// ─── Ambiance fixture ───
+
+import type { AmbianceAsset } from '@/types/audio'
+
+const ambianceNature: AmbianceAsset = {
+  id: 'ambiance-nature-001',
+  filename: 'forest-light-001.wav',
+  filePath: '/assets/ambiance/forest-light-001.wav',
+  description: 'Forêt légère',
+  mood: 'nature',
+  durationS: 6.0,
+  loopable: true,
+  tags: ['forêt'],
+}
 
 // ─── FX fixtures ───
 
@@ -106,7 +130,10 @@ function setupHappyPath() {
   mockReadFile.mockResolvedValue(JSON.stringify(sampleScript) as any)
   mockRenderDialogueToTTS.mockResolvedValue(sampleManifest)
   mockLoadFXIndex.mockResolvedValue([fxTransition, fxImpact])
+  mockLoadAmbianceIndex.mockResolvedValue([ambianceNature])
+  mockSelectAmbianceForScene.mockReturnValue(ambianceNature)
   mockResolveMusicFromStructure.mockResolvedValue(null)
+  mockRunSttValidation.mockResolvedValue(undefined)
   mockAssembleSceneTTS.mockImplementation(async ({ scene }) => ({
     sceneIndex: scene.sceneIndex,
     concatFilePath: `/tmp/run_test/audio/scenes/${scene.sceneIndex}/tts-scene${scene.sceneIndex}.wav`,
@@ -290,5 +317,95 @@ describe('step4cAudio — Music', () => {
     await step4cAudio.execute(makeCtx())
     expect(mockResolveMusicFromStructure).toHaveBeenCalledOnce()
     expect(mockResolveMusicFromStructure).toHaveBeenCalledWith('/tmp/run_test')
+  })
+})
+
+describe('step4cAudio — Ambiance', () => {
+  it('loadAmbianceIndex appelé exactement une fois (pas dans la boucle)', async () => {
+    setupHappyPath()
+    await step4cAudio.execute(makeCtx())
+    expect(mockLoadAmbianceIndex).toHaveBeenCalledOnce()
+  })
+
+  it('ambiance résolue → mixScene reçoit ambiancePath non null pour toutes les scènes', async () => {
+    setupHappyPath()
+    await step4cAudio.execute(makeCtx())
+    for (const call of mockMixScene.mock.calls) {
+      expect(call[0].ambiancePath).toBe('/assets/ambiance/forest-light-001.wav')
+    }
+  })
+
+  it('ambiancePath dans outputData', async () => {
+    setupHappyPath()
+    const result = await step4cAudio.execute(makeCtx())
+    const data = result.outputData as Record<string, unknown>
+    expect(data.ambiancePath).toBe('/assets/ambiance/forest-light-001.wav')
+  })
+
+  it('ambianceIndexMissing=false si assets présents', async () => {
+    setupHappyPath()
+    const result = await step4cAudio.execute(makeCtx())
+    const data = result.outputData as Record<string, unknown>
+    expect(data.ambianceIndexMissing).toBe(false)
+  })
+
+  it('ambianceIndex absent → ambiancePath null + ambianceIndexMissing=true', async () => {
+    setupHappyPath()
+    mockLoadAmbianceIndex.mockResolvedValue([])
+    mockSelectAmbianceForScene.mockReturnValue(null)
+    const result = await step4cAudio.execute(makeCtx())
+    const data = result.outputData as Record<string, unknown>
+    expect(data.ambiancePath).toBeNull()
+    expect(data.ambianceIndexMissing).toBe(true)
+  })
+
+  it('ambianceIndex absent → mixScene appelé avec ambiancePath null (dialogue-only)', async () => {
+    setupHappyPath()
+    mockLoadAmbianceIndex.mockResolvedValue([])
+    mockSelectAmbianceForScene.mockReturnValue(null)
+    await step4cAudio.execute(makeCtx())
+    for (const call of mockMixScene.mock.calls) {
+      expect(call[0].ambiancePath).toBeNull()
+    }
+  })
+})
+
+describe('step4cAudio — STT', () => {
+  const originalEnv = process.env
+
+  afterEach(() => {
+    process.env = { ...originalEnv }
+    vi.clearAllMocks()
+  })
+
+  it('STT_ENABLED absent → runSttValidation non appelé, sttValidation absent', async () => {
+    delete process.env.STT_ENABLED
+    setupHappyPath()
+    const result = await step4cAudio.execute(makeCtx())
+    expect(mockRunSttValidation).not.toHaveBeenCalled()
+    const data = result.outputData as Record<string, unknown>
+    expect(data.sttValidation).toBeUndefined()
+  })
+
+  it('STT_ENABLED=true + transcription OK → sttValidation dans outputData', async () => {
+    process.env.STT_ENABLED = 'true'
+    setupHappyPath()
+    mockRunSttValidation.mockResolvedValue({ enabled: true, wer: 0.05, provider: 'faster-whisper/tiny' })
+    const result = await step4cAudio.execute(makeCtx())
+    const data = result.outputData as Record<string, unknown>
+    const stt = data.sttValidation as { enabled: boolean; wer: number; provider: string }
+    expect(stt.enabled).toBe(true)
+    expect(stt.wer).toBe(0.05)
+    expect(stt.provider).toBe('faster-whisper/tiny')
+  })
+
+  it('STT_ENABLED=true + transcription échoue → pipeline continue, sttValidation undefined', async () => {
+    process.env.STT_ENABLED = 'true'
+    setupHappyPath()
+    mockRunSttValidation.mockResolvedValue(undefined)
+    const result = await step4cAudio.execute(makeCtx())
+    expect(result.success).toBe(true)
+    const data = result.outputData as Record<string, unknown>
+    expect(data.sttValidation).toBeUndefined()
   })
 })

@@ -166,6 +166,21 @@ export type FXAsset = {
   tags: string[]
 }
 
+// ─── Ambiance Library ───
+
+export type AmbianceMood = 'neutre' | 'nature' | 'urban' | 'tension' | 'calme'
+
+export type AmbianceAsset = {
+  id: string
+  filename: string
+  filePath: string         // chemin absolu résolu au chargement
+  description: string
+  mood: AmbianceMood
+  durationS: number
+  loopable: true
+  tags: string[]
+}
+
 // ─── Music Library ───
 
 export type MusicMood = 'tension' | 'calme' | 'épique' | 'mélancolie' | 'neutre' | 'mystère' | 'action'

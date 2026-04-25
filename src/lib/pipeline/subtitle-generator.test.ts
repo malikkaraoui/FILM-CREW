@@ -198,6 +198,21 @@ describe('generateSubtitles — aucun dialogue', () => {
   })
 })
 
+// ─── Cas 5 : dialogue_script.json corrompu ───
+
+describe('generateSubtitles — dialogue_script.json corrompu', () => {
+  it('JSON invalide → null, structure.json jamais lu', async () => {
+    mockTranscribeWordLevel.mockResolvedValue(null)
+    mockReadFile.mockResolvedValue('{ invalid json' as never) // SyntaxError
+
+    const result = await generateSubtitles(PARAMS)
+
+    expect(result).toBeNull()
+    expect(mockGenerateSRT).not.toHaveBeenCalled()
+    expect(mockReadFile).toHaveBeenCalledTimes(1) // structure.json non tenté
+  })
+})
+
 // ─── Options ───
 
 describe('generateSubtitles — options langue et modèle', () => {

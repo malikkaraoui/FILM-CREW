@@ -263,7 +263,7 @@ export const step7Preview: PipelineStep = {
     }
 
     // Sous-titres config
-    const enableSubtitles = process.env.ENABLE_SUBTITLES === 'true'
+    const enableSubtitles = ctx.template?.enableSubtitles ?? (process.env.ENABLE_SUBTITLES === 'true')
     const subtitleStyle: SubtitleStyle = ctx.template?.previewSubtitleStyle ?? {}
 
     // ─── Génération SRT si activé ────────────────────────────────────────────

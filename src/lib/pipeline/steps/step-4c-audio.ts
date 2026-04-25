@@ -6,7 +6,10 @@ import { mixScene, DEFAULT_MIX_VOLUMES } from '@/lib/audio/mix-scene'
 import { assembleMaster } from '@/lib/audio/mix-master'
 import { loadFXIndex } from '@/lib/audio/fx-library'
 import { selectFXForScene } from '@/lib/audio/fx-selector'
+import { loadAmbianceIndex } from '@/lib/audio/ambiance-library'
+import { selectAmbianceForScene } from '@/lib/audio/ambiance-selector'
 import { resolveMusicFromStructure } from '@/lib/audio/scene-assets'
+import { runSttValidation } from '@/lib/audio/stt-validation'
 import { logger } from '@/lib/logger'
 import type { DialogueScene, DialogueScript, SceneAudioPackage } from '@/types/audio'
 import type { SceneMixInput } from '@/lib/audio/mix-master'
@@ -102,17 +105,23 @@ export const step4cAudio: PipelineStep = {
       }
     }
 
-    // 4. Résoudre les assets audio globaux (musique + FX index)
-    const [globalMusicPath, fxAssets] = await Promise.all([
+    // 4. Résoudre les assets audio globaux (musique + FX + ambiance)
+    const [globalMusicPath, fxAssets, ambianceAssets] = await Promise.all([
       resolveMusicFromStructure(storagePath),
       loadFXIndex(),
+      loadAmbianceIndex(),
     ])
     if (fxAssets.length === 0) {
       logger.warn({ event: 'audio_fx_index_missing', runId })
     }
+    if (ambianceAssets.length === 0) {
+      logger.warn({ event: 'audio_ambiance_index_missing', runId })
+    }
     if (globalMusicPath) {
       logger.info({ event: 'audio_music_resolved', runId, path: globalMusicPath })
     }
+
+    const globalAmbiancePath = selectAmbianceForScene(ambianceAssets)?.filePath ?? null
 
     // 5. Process each scene
     const sceneMixInputs: SceneMixInput[] = []
@@ -144,7 +153,7 @@ export const step4cAudio: PipelineStep = {
       try {
         await mixScene({
           ttsPath: sceneTTS.concatFilePath,
-          ambiancePath: null,
+          ambiancePath: globalAmbiancePath,
           fxPaths,
           musicPath: globalMusicPath,
           outputPath: mixPath,
@@ -188,6 +197,25 @@ export const step4cAudio: PipelineStep = {
         runId,
       })
 
+      // STT validation optionnelle (non bloquante)
+      const sttValidation = process.env.STT_ENABLED === 'true'
+        ? await runSttValidation({
+            masterPath: masterManifest.masterFilePath,
+            script,
+            language: script.language,
+          })
+        : undefined
+
+      if (sttValidation) {
+        masterManifest.qualityChecks.sttValidation = sttValidation
+        logger.info({
+          event: 'audio_stt_complete',
+          runId,
+          wer: sttValidation.wer,
+          provider: sttValidation.provider,
+        })
+      }
+
       logger.info({
         event: 'audio_step_complete',
         runId,
@@ -206,6 +234,9 @@ export const step4cAudio: PipelineStep = {
           musicPath: globalMusicPath,
           fxCount: totalFxCount,
           fxIndexMissing: fxAssets.length === 0,
+          ambiancePath: globalAmbiancePath,
+          ambianceIndexMissing: ambianceAssets.length === 0,
+          sttValidation,
         },
       }
     } catch (assemblyErr) {

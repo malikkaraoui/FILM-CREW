@@ -50,7 +50,10 @@ async function loadDialogues(
       }))
       .filter((s) => s.dialogue.length > 0)
     if (dialogues.length > 0) return dialogues
-  } catch { /* fallback ci-dessous */ }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
+    // ENOENT uniquement → fallback structure.json
+  }
 
   // Fallback : structure.json
   const raw = await readFile(join(storagePath, 'structure.json'), 'utf-8')
