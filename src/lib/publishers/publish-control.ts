@@ -53,7 +53,10 @@ export async function getPublishControl(runId: string, finalDir?: string): Promi
     tiktokHealthCheck(),
   ])
 
-  const state = deriveState(lastResult)
+  const baseState = deriveState(lastResult)
+  const state = baseState === 'not_published' && tiktokHealth.status === 'no_credentials'
+    ? 'no_credentials'
+    : baseState
   const { action, label } = deriveNextAction(state)
 
   return {
