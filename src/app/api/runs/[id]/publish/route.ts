@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
 import { isAbsolute, join } from 'path'
-import { savePublishResult, readPublishResult, tiktokHealthCheck } from '@/lib/publishers/tiktok'
+import { savePublishResult } from '@/lib/publishers/tiktok'
 import { publishToPlatform, isSupportedPlatform, upsertPublishManifest, SUPPORTED_PUBLISH_PLATFORMS } from '@/lib/publishers/factory'
+import { runPublishPreflight } from '@/lib/publishers/preflight'
+import { getPublishControl } from '@/lib/publishers/publish-control'
 import { logger } from '@/lib/logger'
 
 type PreviewManifest = {
@@ -14,8 +16,9 @@ type PreviewManifest = {
 
 /**
  * GET /api/runs/[id]/publish
- * Retourne le statut de publication actuel du run (publish-result.json).
- * Si aucun publish-result.json n'existe : { status: 'not_published' }.
+ *
+ * C1.4 — Contrôle opérateur enrichi.
+ * Retourne un PublishControl : état, dernier résultat, santé plateforme, prochaine action.
  */
 export async function GET(
   _request: Request,
@@ -23,21 +26,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const result = await readPublishResult(id)
-
-    if (!result) {
-      const health = await tiktokHealthCheck()
-      return NextResponse.json({
-        data: {
-          status: 'not_published',
-          tiktokHealth: health,
-        },
-      })
-    }
-
-    logger.info({ event: 'publish_status_fetched', runId: id, status: result.status })
-    return NextResponse.json({ data: result })
+    const control = await getPublishControl(id)
+    logger.info({ event: 'publish_control_fetched', runId: id, state: control.state, nextAction: control.nextAction })
+    return NextResponse.json({ data: control })
   } catch (e) {
+    logger.error({ event: 'publish_control_error', error: (e as Error).message })
     return NextResponse.json(
       { error: { code: 'PUBLISH_STATUS_ERROR', message: (e as Error).message } },
       { status: 500 },
@@ -66,7 +59,7 @@ export async function POST(
 ) {
   const { id } = await params
 
-  let body: { platform: string }
+  let body: { platform: string; dry_run?: boolean }
   try {
     body = await request.json()
   } catch {
@@ -74,6 +67,14 @@ export async function POST(
       { error: { code: 'BAD_REQUEST', message: 'Corps JSON invalide' } },
       { status: 400 },
     )
+  }
+
+  // C1.2 — Mode dry_run : retourne le rapport preflight sans publier
+  if (body.dry_run) {
+    const platform = isSupportedPlatform(body.platform) ? body.platform : 'tiktok'
+    logger.info({ event: 'publish_dry_run', runId: id, platform })
+    const report = await runPublishPreflight(id, platform)
+    return NextResponse.json({ data: report }, { status: report.ready ? 200 : 422 })
   }
 
   if (!isSupportedPlatform(body.platform)) {

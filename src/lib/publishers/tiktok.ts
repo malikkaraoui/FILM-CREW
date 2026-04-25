@@ -180,6 +180,8 @@ export type PublishResult = {
   hashtags: string[]
   mediaMode: string
   mediaSizeBytes?: number
+  /** C1.3 — Nombre de relances après le premier essai */
+  retryCount?: number
 }
 
 function getTikTokProfileUrl(): string | undefined {

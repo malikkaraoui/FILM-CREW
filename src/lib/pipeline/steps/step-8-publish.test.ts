@@ -6,10 +6,15 @@ import { join } from 'path'
 
 vi.mock('@/lib/publishers/tiktok')
 vi.mock('@/lib/publishers/factory')
+vi.mock('@/lib/publishers/publish-package', () => ({
+  buildPublishPackage: vi.fn().mockReturnValue({}),
+  savePublishPackage: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock('@/lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 vi.mock('fs/promises', () => ({
   readFile: vi.fn(),
   writeFile: vi.fn().mockResolvedValue(undefined),
+  mkdir: vi.fn().mockResolvedValue(undefined),
 }))
 
 import { readFile, writeFile } from 'fs/promises'
