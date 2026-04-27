@@ -1,34 +1,57 @@
-import type { FXAsset } from '@/types/audio'
-import type { DialogueScene } from '@/types/audio'
+import type { FXAsset, DialogueScene } from '@/types/audio'
+
+// Mots-clés indiquant un besoin de FX impacts / transitions
+const IMPACT_KEYWORDS = ['impact', 'choc', 'coup', 'frappe', 'explos', 'bang', 'crash', 'claque', 'bris']
+const TRANSITION_KEYWORDS = ['transition', 'fondu', 'coupé', 'cut', 'enchaîn', 'bascule', 'switch', 'glisse']
+const DRAMATIC_TONES = ['urgent', 'violent', 'intense', 'dramatique', 'choqué', 'agressif']
+
+function hasKeyword(text: string, keywords: string[]): boolean {
+  const lower = text.toLowerCase()
+  return keywords.some((kw) => lower.includes(kw))
+}
 
 /**
- * Sélectionne les FX assets à jouer pour une scène donnée.
+ * V2 — sélection FX combinant règles positionnelles et analyse sémantique.
  *
- * V1 — règles éditoriales statiques par position de scène :
- *   - Première scène → premier asset de catégorie "transitions"
- *   - Dernière scène  → premier asset de catégorie "impacts"
- *   - Scènes intermédiaires → aucun FX
+ * Règles positionnelles (V1) :
+ *   - Première scène → catégorie 'transitions'
+ *   - Dernière scène  → catégorie 'impacts'
  *
- * Tous les FX sélectionnés sont appliqués à t=0 dans la scène.
- * Le timing précis (triggerAt) est réservé pour V2.
+ * Règles sémantiques (V2) :
+ *   - scene.stageDirections contient mots-clés impact  → catégorie 'impacts'
+ *   - scene.stageDirections contient mots-clés transition → catégorie 'transitions'
+ *   - Au moins une ligne avec tone dramatique → catégorie 'impacts'
+ *
+ * Déduplication : max 1 asset retenu par catégorie (premier dans la liste).
  */
 export function selectFXForScene(
-  _scene: DialogueScene,
+  scene: DialogueScene,
   assets: FXAsset[],
   isFirst: boolean,
   isLast: boolean,
 ): FXAsset[] {
   if (assets.length === 0) return []
 
-  const selected: FXAsset[] = []
+  const categoriesWanted = new Set<string>()
 
-  if (isFirst) {
-    const fx = assets.find((a) => a.category === 'transitions')
-    if (fx) selected.push(fx)
+  // Règles positionnelles
+  if (isFirst) categoriesWanted.add('transitions')
+  if (isLast) categoriesWanted.add('impacts')
+
+  // Règles sémantiques — stageDirections
+  if (scene.stageDirections) {
+    if (hasKeyword(scene.stageDirections, IMPACT_KEYWORDS)) categoriesWanted.add('impacts')
+    if (hasKeyword(scene.stageDirections, TRANSITION_KEYWORDS)) categoriesWanted.add('transitions')
   }
 
-  if (isLast) {
-    const fx = assets.find((a) => a.category === 'impacts')
+  // Règles sémantiques — tonalité dramatique des lignes
+  const hasDramaticTone = scene.lines.some((l) => hasKeyword(l.tone, DRAMATIC_TONES))
+  if (hasDramaticTone) categoriesWanted.add('impacts')
+
+  // Un asset par catégorie voulue (premier match)
+  const selected: FXAsset[] = []
+  for (const category of categoriesWanted) {
+    const fx = assets.find((a) => a.category === category)
     if (fx) selected.push(fx)
   }
 

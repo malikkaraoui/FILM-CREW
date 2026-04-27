@@ -129,6 +129,9 @@ export const audioMasterManifestSchema = z.object({
   qualityChecks: z.object({
     allScenesRendered: z.boolean(),
     totalCostEur: z.number().min(0),
+    integratedLoudnessLUFS: z.number().finite().optional(),
+    truePeakDBTP: z.number().finite().optional(),
+    loudnessRangeLU: z.number().finite().optional(),
     sttValidation: z.object({
       enabled: z.boolean(),
       wer: z.number().min(0).max(1),

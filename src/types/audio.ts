@@ -255,6 +255,9 @@ export type SceneAudioRenderStatus = {
 export type AudioQualityChecks = {
   allScenesRendered: boolean
   totalCostEur: number
+  integratedLoudnessLUFS?: number
+  truePeakDBTP?: number
+  loudnessRangeLU?: number
   sttValidation?: {
     enabled: boolean
     wer: number
