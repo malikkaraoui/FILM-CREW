@@ -1,11 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getChainById, updateChain, deleteChain } from '@/lib/db/queries/chains'
-import { deleteAudioAssetsForRun } from '@/lib/db/queries/audio-assets'
-import { deleteProviderLogsForRun } from '@/lib/db/queries/logs'
-import { getRunsByChainId, deleteRun } from '@/lib/db/queries/runs'
-import { deleteAgentTraces } from '@/lib/db/queries/traces'
-import { rm } from 'fs/promises'
-import { join } from 'path'
+import { getChainById, updateChain, archiveChain } from '@/lib/db/queries/chains'
+import { getRunsByChainId } from '@/lib/db/queries/runs'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -59,6 +54,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       )
     }
 
+    if (chain.archivedAt) {
+      return NextResponse.json(
+        { error: { code: 'CHAIN_ALREADY_ARCHIVED', message: 'Cette chaîne est déjà archivée.' } },
+        { status: 409 }
+      )
+    }
+
     const runs = await getRunsByChainId(id)
     const activeRuns = runs.filter((run) => ['pending', 'running'].includes(run.status))
 
@@ -67,29 +69,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
         {
           error: {
             code: 'CHAIN_HAS_ACTIVE_RUNS',
-            message: 'Impossible de supprimer cette chaîne tant qu’un projet est encore pending/running dessus.',
+            message: 'Impossible d’archiver cette chaîne tant qu’un projet est encore pending/running dessus.',
           },
         },
         { status: 409 }
       )
     }
 
-    for (const run of runs) {
-      const storagePath = join(process.cwd(), 'storage', 'runs', run.id)
-      await rm(storagePath, { recursive: true, force: true }).catch(() => {})
-      await deleteProviderLogsForRun(run.id)
-      await deleteAudioAssetsForRun(run.id)
-      await deleteAgentTraces(run.id)
-      await deleteRun(run.id)
-    }
-
-    await deleteChain(id)
-
-    // Supprimer le dossier storage
-    const brandPath = join(process.cwd(), 'storage', 'brands', id)
-    await rm(brandPath, { recursive: true, force: true })
-
-    return NextResponse.json({ data: { deleted: true } })
+    const archived = await archiveChain(id)
+    return NextResponse.json({ data: { archived: true, chain: archived } })
   } catch (e) {
     return NextResponse.json(
       { error: { code: 'DB_ERROR', message: (e as Error).message } },

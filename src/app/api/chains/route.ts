@@ -3,9 +3,12 @@ import { getChains, createChain } from '@/lib/db/queries/chains'
 import { mkdir } from 'fs/promises'
 import { join } from 'path'
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const chains = await getChains()
+    const archived = new URL(request.url).searchParams.get('archived')
+    const chains = archived === '1'
+      ? await getChains({ archivedOnly: true })
+      : await getChains()
     return NextResponse.json({ data: chains })
   } catch (e) {
     return NextResponse.json(

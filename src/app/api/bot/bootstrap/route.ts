@@ -250,6 +250,18 @@ export async function POST(request: Request) {
     let chain = requestedChainId ? await getChainById(requestedChainId) : null
     let chainCreated = false
 
+    if (chain?.archivedAt) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'CHAIN_ARCHIVED',
+            message: 'Chaîne archivée — restaurer avant de créer un run.',
+          },
+        },
+        { status: 409 },
+      )
+    }
+
     if (!chain && requestedChainName) {
       const chains = await getChains()
       chain = chains.find((entry) => normalizeBotToken(entry.name) === normalizeBotToken(requestedChainName)) ?? null
