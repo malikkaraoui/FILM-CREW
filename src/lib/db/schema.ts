@@ -6,6 +6,7 @@ export const chain = pgTable('chain', {
   langSource: text('lang_source').notNull().default('fr'),
   audience: text('audience'),
   brandKitPath: text('brand_kit_path'),
+  archivedAt: timestamp('archived_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 })

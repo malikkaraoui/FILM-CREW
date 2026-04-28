@@ -1,9 +1,20 @@
 import { db } from '../connection'
 import { chain, publicationAccount } from '../schema'
-import { eq } from 'drizzle-orm'
+import { eq, isNull, isNotNull, lt } from 'drizzle-orm'
 
-export async function getChains() {
-  return db.select().from(chain).orderBy(chain.createdAt)
+type GetChainsOptions = {
+  archivedOnly?: boolean
+  includeArchived?: boolean
+}
+
+export async function getChains(options: GetChainsOptions = {}) {
+  if (options.archivedOnly) {
+    return db.select().from(chain).where(isNotNull(chain.archivedAt)).orderBy(chain.createdAt)
+  }
+  if (options.includeArchived) {
+    return db.select().from(chain).orderBy(chain.createdAt)
+  }
+  return db.select().from(chain).where(isNull(chain.archivedAt)).orderBy(chain.createdAt)
 }
 
 export async function getChainById(id: string | null | undefined) {
@@ -34,6 +45,29 @@ export async function updateChain(id: string, data: Partial<{
     .where(eq(chain.id, id))
     .returning()
   return row
+}
+
+export async function archiveChain(id: string) {
+  const now = new Date()
+  const [row] = await db
+    .update(chain)
+    .set({ archivedAt: now, updatedAt: now })
+    .where(eq(chain.id, id))
+    .returning()
+  return row
+}
+
+export async function restoreChain(id: string) {
+  const [row] = await db
+    .update(chain)
+    .set({ archivedAt: null, updatedAt: new Date() })
+    .where(eq(chain.id, id))
+    .returning()
+  return row
+}
+
+export async function getChainsArchivedBefore(date: Date) {
+  return db.select().from(chain).where(lt(chain.archivedAt, date))
 }
 
 export async function deleteChain(id: string) {

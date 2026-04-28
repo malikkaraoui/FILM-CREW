@@ -4,6 +4,7 @@ export type Chain = {
   langSource: string
   audience: string | null
   brandKitPath: string | null
+  archivedAt: Date | null
   createdAt: Date | null
   updatedAt: Date | null
 }
