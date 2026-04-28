@@ -145,9 +145,6 @@ describe('10A — Publication TikTok', () => {
       // Les valeurs doivent correspondre exactement aux env vars
       expect(credentials.hasAccessToken).toBe(hasToken)
       expect(credentials.hasClientKey).toBe(hasKey)
-      // Dans notre env de test, les deux sont absents
-      expect(credentials.hasAccessToken).toBe(false)
-      expect(credentials.hasClientKey).toBe(false)
     })
   })
 

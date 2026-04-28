@@ -7,13 +7,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { ModelSelector } from '@/components/llm/model-selector'
 import { useLlmCatalog } from '@/lib/client/use-llm-catalog'
 import { INTENTION_BLOCS, getVisibleQuestions } from '@/lib/intention/schema'
-import {
-  buildModelOptions,
-  findModelDetail,
-  getModelDetailsForMode,
-} from '@/lib/llm/catalog'
+import { LLM_MODES } from '@/lib/llm/catalog'
 import { parseStepLlmDefaultsFromConfigEntries } from '@/lib/settings/step-llm-defaults'
 import type { Chain } from '@/types/chain'
 import type { MeetingLlmMode } from '@/types/run'
@@ -137,10 +134,28 @@ function NewRunForm() {
     : meetingMode === 'openrouter'
       ? meetingOpenRouterModel.trim()
       : meetingLocalModel.trim()
-  const meetingLocalModelOptions = buildModelOptions(getModelDetailsForMode(catalog, 'local'), meetingLocalModel)
-  const meetingCloudModelOptions = buildModelOptions(getModelDetailsForMode(catalog, 'cloud'), meetingCloudModel)
-  const meetingOpenRouterModelOptions = buildModelOptions(getModelDetailsForMode(catalog, 'openrouter'), meetingOpenRouterModel)
-  const selectedMeetingDetail = findModelDetail(catalog, meetingMode, selectedMeetingModel)
+  const setMeetingModelForMode = (next: string) => {
+    if (meetingMode === 'cloud') setMeetingCloudModel(next)
+    else if (meetingMode === 'openrouter') setMeetingOpenRouterModel(next)
+    else setMeetingLocalModel(next)
+  }
+  const currentMeetingModel = meetingMode === 'cloud'
+    ? meetingCloudModel
+    : meetingMode === 'openrouter'
+      ? meetingOpenRouterModel
+      : meetingLocalModel
+  const meetingHelperText = meetingMode === 'local'
+    ? 'Liste Ollama sondée en live en arrière-plan tant que ce provider est sélectionné.'
+    : meetingMode === 'openrouter'
+      ? 'Listing live des modèles texte gratuits OpenRouter pour la réunion de l’étape 2.'
+      : catalog.cloudModels.length > 0
+        ? `Cloud dispo : ${catalog.cloudModels.join(' · ')}`
+        : null
+  const meetingLabel = meetingMode === 'local'
+    ? 'Modèle local'
+    : meetingMode === 'cloud'
+      ? 'Modèle cloud'
+      : 'Modèle OpenRouter'
   const derivedSceneCount = Math.max(1, Math.ceil(fullVideoDurationS / LOCKED_SCENE_DURATION_S))
   const durationMismatch = fullVideoDurationS % LOCKED_SCENE_DURATION_S !== 0
   const referenceImageUrls = [
@@ -406,128 +421,30 @@ function NewRunForm() {
             <CardTitle className="text-sm font-medium">Réunion LLM</CardTitle>
             <div className="space-y-3 text-sm">
               <div>
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="meeting-mode">Mode</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void refreshCatalog(meetingMode, true)}
-                    disabled={refreshingProvider === meetingMode}
-                  >
-                    {refreshingProvider === meetingMode ? 'Rafraîchissement...' : 'Rafraîchir la liste'}
-                  </Button>
-                </div>
+                <Label htmlFor="meeting-mode">Mode</Label>
                 <select
                   id="meeting-mode"
                   value={meetingMode}
                   onChange={(e) => handleMeetingModeChange(e.target.value as MeetingLlmMode)}
                   className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                 >
-                  <option value="local">Local via Ollama (sur ce Mac)</option>
-                  <option value="cloud">Cloud via Ollama</option>
-                  <option value="openrouter">OpenRouter (texte)</option>
+                  {LLM_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
                 </select>
               </div>
 
-              {meetingMode === 'local' ? (
-                <div>
-                  <Label htmlFor="meeting-local-model">Modèle local</Label>
-                  {meetingLocalModelOptions.length > 0 ? (
-                    <select
-                      id="meeting-local-model"
-                      value={meetingLocalModel}
-                      onChange={(e) => setMeetingLocalModel(e.target.value)}
-                      className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                    >
-                      {meetingLocalModelOptions.map((model) => (
-                        <option key={model.id} value={model.id}>{model.label}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <Input
-                      id="meeting-local-model"
-                      value={meetingLocalModel}
-                      onChange={(e) => setMeetingLocalModel(e.target.value)}
-                      placeholder="qwen2.5:7b"
-                    />
-                  )}
-                  {catalog.localError && (
-                    <p className="mt-1 text-xs text-amber-700">
-                      {catalog.localError}
-                    </p>
-                  )}
-                  {selectedMeetingDetail?.description && (
-                    <p className="mt-1 text-xs text-muted-foreground">{selectedMeetingDetail.description}</p>
-                  )}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Liste Ollama sondée en live en arrière-plan tant que ce provider est sélectionné.
-                  </p>
-                </div>
-              ) : meetingMode === 'cloud' ? (
-                <div>
-                  <Label htmlFor="meeting-cloud-model">Modèle cloud</Label>
-                  {meetingCloudModelOptions.length > 0 ? (
-                    <select
-                      id="meeting-cloud-model"
-                      value={meetingCloudModel}
-                      onChange={(e) => setMeetingCloudModel(e.target.value)}
-                      className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                    >
-                      {meetingCloudModelOptions.map((model) => (
-                        <option key={model.id} value={model.id}>{model.label}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <Input
-                      id="meeting-cloud-model"
-                      value={meetingCloudModel}
-                      onChange={(e) => setMeetingCloudModel(e.target.value)}
-                      placeholder="deepseek-v3.1:671b-cloud"
-                    />
-                  )}
-                  {selectedMeetingDetail?.description && (
-                    <p className="mt-1 text-xs text-muted-foreground">{selectedMeetingDetail.description}</p>
-                  )}
-                  {catalog.cloudModels.length > 0 && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Cloud dispo : {catalog.cloudModels.join(' · ')}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  <Label htmlFor="meeting-openrouter-model">Modèle OpenRouter</Label>
-                  {meetingOpenRouterModelOptions.length > 0 ? (
-                    <select
-                      id="meeting-openrouter-model"
-                      value={meetingOpenRouterModel}
-                      onChange={(e) => setMeetingOpenRouterModel(e.target.value)}
-                      className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                    >
-                      {meetingOpenRouterModelOptions.map((model) => (
-                        <option key={model.id} value={model.id}>{model.label}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <Input
-                      id="meeting-openrouter-model"
-                      value={meetingOpenRouterModel}
-                      onChange={(e) => setMeetingOpenRouterModel(e.target.value)}
-                      placeholder="nvidia/nemotron-3-nano-30b-a3b:free"
-                    />
-                  )}
-                  {selectedMeetingDetail?.description && (
-                    <p className="mt-1 text-xs text-muted-foreground">{selectedMeetingDetail.description}</p>
-                  )}
-                  {catalog.openRouterError && (
-                    <p className="mt-1 text-xs text-amber-700">{catalog.openRouterError}</p>
-                  )}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Listing live des modèles texte gratuits OpenRouter pour la réunion de l’étape 2.
-                  </p>
-                </div>
-              )}
+              <ModelSelector
+                id={`meeting-${meetingMode}-model`}
+                mode={meetingMode}
+                value={currentMeetingModel}
+                onChange={setMeetingModelForMode}
+                catalog={catalog}
+                refreshingProvider={refreshingProvider}
+                onRefresh={() => void refreshCatalog(meetingMode, true)}
+                label={meetingLabel}
+                helperText={meetingHelperText}
+              />
 
               <p className="text-xs text-muted-foreground">
                 Rien ne part automatiquement : tu crées d’abord le projet, puis tu lances l’étape 1 manuellement depuis la page projet.

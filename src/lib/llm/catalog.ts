@@ -2,6 +2,12 @@ import type { LlmMode } from '@/types/run'
 
 export type LlmCatalogProvider = 'all' | 'local' | 'cloud' | 'openrouter'
 
+export const LLM_MODES: ReadonlyArray<{ value: LlmMode; label: string }> = [
+  { value: 'local', label: 'Local' },
+  { value: 'cloud', label: 'Cloud' },
+  { value: 'openrouter', label: 'OpenRouter' },
+]
+
 export type LlmCatalogModelDetail = {
   id: string
   label: string

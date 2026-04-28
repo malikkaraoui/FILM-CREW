@@ -8,12 +8,8 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useLlmCatalog } from '@/lib/client/use-llm-catalog'
 import { translatePromptText } from '@/lib/client/prompt-translation'
-import {
-  buildModelOptions,
-  findModelDetail,
-  getModelDetailsForMode,
-  getModelsForMode,
-} from '@/lib/llm/catalog'
+import { ModelSelector } from '@/components/llm/model-selector'
+import { LLM_MODES, getModelsForMode } from '@/lib/llm/catalog'
 import type { LlmMode, ProjectConfig, Run, RunStep, StepLlmConfig } from '@/types/run'
 import { TOTAL_PIPELINE_STEPS } from '@/lib/pipeline/constants'
 import { getRunStepLabel } from '@/lib/runs/presentation'
@@ -634,7 +630,6 @@ export default function RunPage() {
   const deliverableClips = useMemo(() => asArray(parsedDeliverable?.clips), [parsedDeliverable])
 
   const selectedStepLlmConfig = getStepLlmConfig(run?.projectConfig, selectedStep)
-  const selectedLlmDetail = findModelDetail(catalog, selectedLlmMode, selectedLlmModel)
 
   useEffect(() => {
     if (!isLlmBackedStep(selectedStep)) return
@@ -877,69 +872,27 @@ export default function RunPage() {
                         className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
                         disabled={run.status === 'running'}
                       >
-                        <option value="local">Local</option>
-                        <option value="cloud">Cloud</option>
-                        <option value="openrouter">OpenRouter</option>
+                        {LLM_MODES.map((m) => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
                       </select>
                     </div>
 
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <label htmlFor="step-llm-model" className="text-xs font-medium text-muted-foreground">Modèle</label>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void refreshCatalog(selectedLlmMode, true)}
-                          disabled={run.status === 'running' || refreshingProvider === selectedLlmMode}
-                        >
-                          {refreshingProvider === selectedLlmMode ? 'Rafraîchissement...' : 'Rafraîchir'}
-                        </Button>
-                      </div>
-                      {buildModelOptions(getModelDetailsForMode(catalog, selectedLlmMode), selectedLlmModel).length > 0 ? (
-                        <select
-                          id="step-llm-model"
-                          value={selectedLlmModel}
-                          onChange={(e) => setSelectedLlmModel(e.target.value)}
-                          className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
-                          disabled={run.status === 'running'}
-                        >
-                          {buildModelOptions(getModelDetailsForMode(catalog, selectedLlmMode), selectedLlmModel).map((model) => (
-                            <option key={model.id} value={model.id}>{model.label}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          id="step-llm-model"
-                          value={selectedLlmModel}
-                          onChange={(e) => setSelectedLlmModel(e.target.value)}
-                          placeholder={selectedLlmMode === 'cloud' ? 'deepseek-v3.1:671b-cloud' : selectedLlmMode === 'openrouter' ? 'nvidia/nemotron-3-nano-30b-a3b:free' : 'qwen2.5:7b'}
-                          className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
-                          disabled={run.status === 'running'}
-                        />
-                      )}
-
-                      {selectedLlmDetail?.description && (
-                        <div className="mt-1 text-xs text-muted-foreground">{selectedLlmDetail.description}</div>
-                      )}
-                    </div>
+                    <ModelSelector
+                      id="step-llm-model"
+                      mode={selectedLlmMode}
+                      value={selectedLlmModel}
+                      onChange={setSelectedLlmModel}
+                      catalog={catalog}
+                      refreshingProvider={refreshingProvider}
+                      onRefresh={() => void refreshCatalog(selectedLlmMode, true)}
+                      disabled={run.status === 'running'}
+                    />
                   </div>
-
-                  {catalog.localError && selectedLlmMode === 'local' && (
-                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      {catalog.localError}
-                    </div>
-                  )}
 
                   {!catalog.openRouterAvailable && selectedLlmMode === 'openrouter' && (
                     <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       OpenRouter n&apos;est pas confirmé côté runtime. Vérifie `OPENROUTER_API_KEY`.
-                    </div>
-                  )}
-
-                  {catalog.openRouterError && selectedLlmMode === 'openrouter' && (
-                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      {catalog.openRouterError}
                     </div>
                   )}
                 </div>

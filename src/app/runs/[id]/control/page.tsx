@@ -1,22 +1,16 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { useLlmCatalog } from '@/lib/client/use-llm-catalog'
-import {
-  buildModelOptions,
-  findModelDetail,
-  getModelDetailsForMode,
-  getModelsForMode,
-  getModelPlaceholder,
-} from '@/lib/llm/catalog'
+import { ModelSelector } from '@/components/llm/model-selector'
+import { LLM_MODES, getModelsForMode } from '@/lib/llm/catalog'
 import type { LlmMode, ProjectConfig } from '@/types/run'
 
 type BotLiveEvent = {
@@ -256,12 +250,6 @@ export default function RunControlPage() {
   const meetingInterventionStatus = meetingRunning
     ? 'Non en direct : la réunion est déjà en vol. Je peux surveiller, résumer, puis relancer orienté ensuite.'
     : 'Oui en relance : je peux réorienter la prochaine réunion avec une note d’orientation + changement de modèle.'
-  const meetingModelOptions = useMemo(
-    () => buildModelOptions(getModelDetailsForMode(catalog, meetingMode), meetingModel),
-    [catalog.cloudModels, catalog.localModels, catalog.openRouterModels, meetingMode, meetingModel],
-  )
-  const selectedMeetingDetail = findModelDetail(catalog, meetingMode, meetingModel)
-
   if (loading && !snapshot) {
     return <p className="text-sm text-muted-foreground">Chargement du tour de contrôle…</p>
   }
@@ -467,18 +455,7 @@ export default function RunControlPage() {
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="meeting-mode">Mode réunion</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void refreshCatalog(meetingMode, true)}
-                    disabled={meetingRunning || refreshingProvider === meetingMode}
-                  >
-                    {refreshingProvider === meetingMode ? 'Rafraîchissement...' : 'Rafraîchir'}
-                  </Button>
-                </div>
+                <Label htmlFor="meeting-mode">Mode réunion</Label>
                 <select
                   id="meeting-mode"
                   value={meetingMode}
@@ -490,39 +467,23 @@ export default function RunControlPage() {
                   className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   disabled={meetingRunning}
                 >
-                  <option value="local">Local</option>
-                  <option value="cloud">Cloud</option>
-                  <option value="openrouter">OpenRouter</option>
+                  {LLM_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
                 </select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="meeting-model">Modèle réunion</Label>
-                {meetingModelOptions.length > 0 ? (
-                  <select
-                    id="meeting-model"
-                    value={meetingModel}
-                    onChange={(e) => setMeetingModel(e.target.value)}
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    disabled={meetingRunning}
-                  >
-                    {meetingModelOptions.map((model) => (
-                      <option key={model.id} value={model.id}>{model.label}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <Input
-                    id="meeting-model"
-                    value={meetingModel}
-                    onChange={(e) => setMeetingModel(e.target.value)}
-                    placeholder={getModelPlaceholder(meetingMode)}
-                    disabled={meetingRunning}
-                  />
-                )}
-                {selectedMeetingDetail?.description && (
-                  <div className="text-xs text-muted-foreground">{selectedMeetingDetail.description}</div>
-                )}
-              </div>
+              <ModelSelector
+                id="meeting-model"
+                mode={meetingMode}
+                value={meetingModel}
+                onChange={setMeetingModel}
+                catalog={catalog}
+                refreshingProvider={refreshingProvider}
+                onRefresh={() => void refreshCatalog(meetingMode, true)}
+                label="Modèle réunion"
+                disabled={meetingRunning}
+              />
 
               <div className="space-y-2">
                 <Label htmlFor="meeting-note">Note d’orientation</Label>
@@ -543,18 +504,6 @@ export default function RunControlPage() {
               {!catalog.openRouterAvailable && meetingMode === 'openrouter' && (
                 <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   OpenRouter n’est pas confirmé côté runtime. Vérifie `OPENROUTER_API_KEY`.
-                </div>
-              )}
-
-              {catalog.openRouterError && meetingMode === 'openrouter' && (
-                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  {catalog.openRouterError}
-                </div>
-              )}
-
-              {catalog.localError && meetingMode === 'local' && (
-                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  {catalog.localError}
                 </div>
               )}
             </CardContent>

@@ -5,6 +5,7 @@ import './globals.css'
 import { Topbar } from '@/components/layout/topbar'
 import { Sidebar } from '@/components/layout/sidebar'
 import { RecoveryBanner } from '@/components/layout/recovery-banner'
+import { isPublicFrontMode } from '@/lib/public-front'
 
 const geist = Geist({
   variable: '--font-geist',
@@ -21,19 +22,30 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const publicFrontMode = isPublicFrontMode()
+
   return (
     <html lang="fr" className={`${geist.variable} h-full antialiased`}>
       <body className="flex h-full flex-col bg-background text-foreground">
-        <Topbar />
-        <RecoveryBanner />
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar />
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <main className="flex-1 overflow-y-auto p-4">
-              {children}
-            </main>
-            <footer className="border-t px-4 py-3 text-xs text-muted-foreground">
-              <div className="flex flex-wrap items-center gap-3">
+        {publicFrontMode ? (
+          <div className="flex min-h-full flex-col">
+            <header className="border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
+              <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
+                <Link href="/" className="text-sm font-semibold tracking-tight">
+                  FILM-CREW
+                </Link>
+                <nav className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                  <Link href="/terms" className="hover:text-foreground">CGU</Link>
+                  <Link href="/privacy" className="hover:text-foreground">Confidentialité</Link>
+                  <Link href="/tiktok/connect" prefetch={false} className="hover:text-foreground">TikTok OAuth</Link>
+                </nav>
+              </div>
+            </header>
+
+            <main className="flex-1">{children}</main>
+
+            <footer className="border-t px-4 py-4 text-xs text-muted-foreground">
+              <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3">
                 <span>FILM-CREW</span>
                 <Link href="/terms" className="hover:text-foreground">
                   Conditions d’utilisation
@@ -44,7 +56,31 @@ export default function RootLayout({
               </div>
             </footer>
           </div>
-        </div>
+        ) : (
+          <>
+            <Topbar />
+            <RecoveryBanner />
+            <div className="flex flex-1 overflow-hidden">
+              <Sidebar />
+              <div className="flex flex-1 flex-col overflow-hidden">
+                <main className="flex-1 overflow-y-auto p-4">
+                  {children}
+                </main>
+                <footer className="border-t px-4 py-3 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span>FILM-CREW</span>
+                    <Link href="/terms" className="hover:text-foreground">
+                      Conditions d’utilisation
+                    </Link>
+                    <Link href="/privacy" className="hover:text-foreground">
+                      Politique de confidentialité
+                    </Link>
+                  </div>
+                </footer>
+              </div>
+            </div>
+          </>
+        )}
       </body>
     </html>
   )

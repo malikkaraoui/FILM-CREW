@@ -5,12 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useLlmCatalog } from '@/lib/client/use-llm-catalog'
-import {
-  buildModelOptions,
-  findModelDetail,
-  getModelDetailsForMode,
-  getModelPlaceholder,
-} from '@/lib/llm/catalog'
+import { ModelSelector } from '@/components/llm/model-selector'
+import { LLM_MODES } from '@/lib/llm/catalog'
 import type { LlmMode, StepLlmConfigs } from '@/types/run'
 import {
   STEP_LLM_DEFAULT_FIELDS,
@@ -146,23 +142,10 @@ export default function SettingsPage() {
               const keys = getStepLlmDefaultConfigKeys(definition.stepKey)
               const mode = (values[keys.modeKey] as LlmMode | undefined) ?? definition.defaultMode
               const selectedModel = values[keys.modelKey] ?? ''
-              const models = buildModelOptions(getModelDetailsForMode(catalog, mode), selectedModel)
-              const selectedModelDetail = findModelDetail(catalog, mode, selectedModel)
 
               return (
                 <div key={definition.stepKey} className="rounded-lg border p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="text-sm font-medium">{definition.label}</div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void refreshCatalog(mode, true)}
-                      disabled={refreshingProvider === mode}
-                    >
-                      {refreshingProvider === mode ? 'Rafraîchissement...' : 'Rafraîchir'}
-                    </Button>
-                  </div>
+                  <div className="text-sm font-medium">{definition.label}</div>
                   <div className="text-xs text-muted-foreground">{definition.description}</div>
 
                   <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -178,47 +161,27 @@ export default function SettingsPage() {
                         }}
                         className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                       >
-                        <option value="local">Local</option>
-                        <option value="cloud">Cloud</option>
-                        <option value="openrouter">OpenRouter</option>
+                        {LLM_MODES.map((m) => (
+                          <option key={m.value} value={m.value}>{m.label}</option>
+                        ))}
                       </select>
                     </div>
 
-                    <div>
-                      <Label htmlFor={keys.modelKey}>Modèle par défaut</Label>
-                      {models.length > 0 ? (
-                        <select
-                          id={keys.modelKey}
-                          value={selectedModel}
-                          onChange={(e) => setValues((prev) => ({ ...prev, [keys.modelKey]: e.target.value }))}
-                          className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                        >
-                          {models.map((model) => (
-                            <option key={model.id} value={model.id}>{model.label}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <Input
-                          id={keys.modelKey}
-                          value={values[keys.modelKey] ?? ''}
-                          onChange={(e) => setValues((prev) => ({ ...prev, [keys.modelKey]: e.target.value }))}
-                          placeholder={getModelPlaceholder(mode)}
-                        />
-                      )}
-
-                      {selectedModelDetail?.description && (
-                        <p className="mt-1 text-xs text-muted-foreground">{selectedModelDetail.description}</p>
-                      )}
-                    </div>
+                    <ModelSelector
+                      id={keys.modelKey}
+                      mode={mode}
+                      value={selectedModel}
+                      onChange={(next) => setValues((prev) => ({ ...prev, [keys.modelKey]: next }))}
+                      catalog={catalog}
+                      refreshingProvider={refreshingProvider}
+                      onRefresh={() => void refreshCatalog(mode, true)}
+                      label="Modèle par défaut"
+                    />
                   </div>
                 </div>
               )
             })}
           </div>
-
-          {catalog.localError && (
-            <p className="text-xs text-amber-700">{catalog.localError}</p>
-          )}
         </div>
 
         <Button onClick={handleSave} disabled={saving}>

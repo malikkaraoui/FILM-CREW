@@ -6,14 +6,9 @@ import { Button } from '@/components/ui/button'
 import { AgentChat } from '@/components/studio/agent-chat'
 import { FULL_SPEAKING_SEQUENCE, getMeetingState } from '@/lib/agents/meeting-sequence'
 import { useLlmCatalog } from '@/lib/client/use-llm-catalog'
+import { ModelSelector } from '@/components/llm/model-selector'
 import type { MeetingState } from '@/lib/agents/meeting-sequence'
-import {
-  buildModelOptions,
-  findModelDetail,
-  getModelDetailsForMode,
-  getModelsForMode,
-  getModelPlaceholder,
-} from '@/lib/llm/catalog'
+import { LLM_MODES, getModelsForMode } from '@/lib/llm/catalog'
 import type { LlmMode, ProjectConfig, Run, RunStep } from '@/types/run'
 
 type RunWithSteps = Run & { steps: RunStep[]; projectConfig?: ProjectConfig | null }
@@ -356,8 +351,6 @@ export default function StudioPage() {
       : 'Retour au cockpit'
   const cloudModelsLabel = catalog.cloudModels.join(' · ')
   const openRouterModelsLabel = catalog.openRouterModels.join(' · ')
-  const selectedMeetingDetail = findModelDetail(catalog, selectedMeetingMode, selectedMeetingModel)
-  const selectedNextStepDetail = findModelDetail(catalog, nextStepMode, nextStepModel)
 
   function renderModelPicker(options: {
     mode: LlmMode
@@ -367,9 +360,6 @@ export default function StudioPage() {
     prefix: string
     disabled?: boolean
   }) {
-    const models = buildModelOptions(getModelDetailsForMode(catalog, options.mode), options.model)
-    const placeholder = getModelPlaceholder(options.mode)
-
     return (
       <div className="grid gap-3 md:grid-cols-[180px_minmax(0,1fr)]">
         <div>
@@ -385,37 +375,22 @@ export default function StudioPage() {
             className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
             disabled={options.disabled}
           >
-            <option value="local">Local</option>
-            <option value="cloud">Cloud</option>
-            <option value="openrouter">OpenRouter</option>
+            {LLM_MODES.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
           </select>
         </div>
 
-        <div>
-          <label htmlFor={`${options.prefix}-model`} className="text-xs font-medium text-muted-foreground">Modèle</label>
-          {models.length > 0 ? (
-            <select
-              id={`${options.prefix}-model`}
-              value={options.model}
-              onChange={(e) => options.onModelChange(e.target.value)}
-              className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
-              disabled={options.disabled}
-            >
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>{model.label}</option>
-              ))}
-            </select>
-          ) : (
-            <input
-              id={`${options.prefix}-model`}
-              value={options.model}
-              onChange={(e) => options.onModelChange(e.target.value)}
-              placeholder={placeholder}
-              className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
-              disabled={options.disabled}
-            />
-          )}
-        </div>
+        <ModelSelector
+          id={`${options.prefix}-model`}
+          mode={options.mode}
+          value={options.model}
+          onChange={options.onModelChange}
+          catalog={catalog}
+          refreshingProvider={refreshingProvider}
+          onRefresh={() => void refreshCatalog(options.mode, true)}
+          disabled={options.disabled}
+        />
       </div>
     )
   }
@@ -435,18 +410,7 @@ export default function StudioPage() {
       {isIdle && (
         <div className="rounded-lg border p-4 space-y-3">
           <div>
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-medium">LLM de la réunion</div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void refreshCatalog(selectedMeetingMode, true)}
-                disabled={refreshingProvider === selectedMeetingMode}
-              >
-                {refreshingProvider === selectedMeetingMode ? 'Rafraîchissement...' : 'Rafraîchir'}
-              </Button>
-            </div>
+            <div className="text-sm font-medium">LLM de la réunion</div>
             <div className="text-xs text-muted-foreground">
                 Cloud dispo : {cloudModelsLabel || 'aucun catalogue cloud reçu'}{openRouterModelsLabel ? ` · OpenRouter : ${openRouterModelsLabel}` : ''}
             </div>
@@ -459,22 +423,6 @@ export default function StudioPage() {
             onModelChange: setSelectedMeetingModel,
             prefix: 'meeting',
           })}
-
-          {selectedMeetingDetail?.description && (
-            <div className="text-xs text-muted-foreground">{selectedMeetingDetail.description}</div>
-          )}
-
-          {catalog.localError && selectedMeetingMode === 'local' && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              {catalog.localError}
-            </div>
-          )}
-
-          {catalog.openRouterError && selectedMeetingMode === 'openrouter' && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              {catalog.openRouterError}
-            </div>
-          )}
 
           <div>
             <label htmlFor="meeting-prompt-note" className="text-xs font-medium text-muted-foreground">
@@ -584,10 +532,6 @@ export default function StudioPage() {
               onModelChange: setNextStepModel,
               prefix: 'step3',
             })}
-
-            {selectedNextStepDetail?.description && (
-              <div className="text-xs text-muted-foreground">{selectedNextStepDetail.description}</div>
-            )}
           </div>
 
           <div className="flex flex-wrap gap-2">

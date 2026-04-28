@@ -1,0 +1,5 @@
+.env
+.env.*
+storage/
+assets/music/downloads/
+coverage/
