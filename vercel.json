@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/purge-archived-chains",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
